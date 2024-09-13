@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>呼吸器3クイズ</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background-color: #f5f5f7;
+      padding: 20px;
+      margin: 0;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1, h2 {
+      font-size: 2.5em;
+      margin-bottom: 30px;
+      text-align: center;
+      color: #1d1d1f;
+    }
+    .quiz-container, .result-card {
+      background-color: #fff;
+      border-radius: 18px;
+      padding: 30px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    .question {
+      font-size: 1.3em;
+      margin-bottom: 20px;
+      color: #1d1d1f;
+    }
+    .options {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+    }
+    .option {
+      background-color: #f5f5f7;
+      border: 2px solid #007aff;
+      border-radius: 12px;
+      padding: 15px;
+      font-size: 1em;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .option:hover {
+      background-color: #e8e8ed;
+    }
+    .option.selected {
+      background-color: #007aff;
+      color: #fff;
+    }
+    .option.disabled {
+      opacity: 0.5;
+      cursor: default;
+      pointer-events: none;
+    }
+    .option::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.1);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .option:active::after {
+      opacity: 1;
+    }
+    @keyframes fadeOut {
+      from { opacity: 1; transform: translateY(0); }
+      to { opacity: 0; transform: translateY(-20px); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-out {
+      animation: fadeOut 0.5s ease-out forwards;
+    }
+    .fade-in {
+      animation: fadeIn 0.5s ease-out forwards;
+    }
+    #quiz-content {
+      transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+    }
+    .explanation {
+      margin-top: 20px;
+      font-size: 1em;
+      color: #333;
+      display: none;
+      background-color: #e8f5e9;
+      border-left: 5px solid #4caf50;
+      border-radius: 0 12px 12px 0;
+      padding: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      animation: fadeIn 0.5s ease-out;
+    }
+    .explanation-header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px;
+      font-weight: bold;
+      color: #4caf50;
+    }
+    .explanation-icon {
+      font-size: 1.5em;
+      margin-right: 10px;
+    }
+    .nav-button {
+      background-color: #007aff;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 12px 24px;
+      font-size: 1em;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+      margin-top: 20px;
+      width: 100%;
+    }
+    .nav-button:hover {
+      background-color: #0056b3;
+    }
+    .result-card {
+      margin-bottom: 20px;
+    }
+    .result-card h3 {
+      font-size: 1.2em;
+      margin-bottom: 10px;
+    }
+    .result-status {
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    .correct {
+      color: #34c759;
+    }
+    .incorrect {
+      color: #ff3b30;
+    }
+    #attendance-link {
+      background-color: #34c759;
+      color: white;
+      padding: 15px;
+      border-radius: 12px;
+      margin-top: 20px;
+      text-align: center;
+      display: none;
+    }
+    #attendance-link a {
+      color: white;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    #attendance-link a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>試験対策 呼吸器3クイズ</h1>
+    <div id="quiz-container" class="quiz-container">
+      <div id="quiz-content">
+        <div id="question" class="question"></div>
+        <div id="options" class="options"></div>
+        <div id="explanation" class="explanation"></div>
+      </div>
+      <button id="next" class="nav-button" onclick="nextQuestion()">次の問題</button>
+    </div>
+    <div id="result-container"></div>
+    <div id="attendance-link"></div>
+  </div>
+
+  <script>
+  const quizData = [
+    {
+      "question": "肺におけるガス交換について、正しい記述はどれか。",
+      "options": [
+        "ガスが移動する際に通過する構造物の厚さの合計は約5μmである。",
+        "O₂の肺胞気と静脈血の分圧差は約40mmHgである。",
+        "CO₂の拡散係数はO₂の約20-30倍である。",
+        "ガスの移動は主に能動輸送によって行われる。"
+      ],
+      "answer": 2,
+      "explanation": "ガスが移動する際に通過する構造物の厚さの合計は0.5～0.8μmと薄く、O₂の肺胞気と静脈血の分圧差は60mmHgです。CO₂の拡散係数はO₂の20～30倍ほど大きく、ガスの移動は分圧差に従う拡散によって行われます。"
+    },
+    {
+      "question": "動脈血のO₂分圧について、正しい記述はどれか。",
+      "options": [
+        "肺胞気のO₂分圧と常に同じである。",
+        "加齢とともに上昇する。",
+        "健常な若年者では約96mmHg程度である。",
+        "生理的シャントの影響を受けない。"
+      ],
+      "answer": 2,
+      "explanation": "動脈血のO₂分圧は、健常な若年者では約96mmHg程度です。これは肺胞気のO₂分圧（100mmHg）より低く、生理的シャントの影響を受けています。また、加齢とともに低下し、60歳では88mmHg、80歳では83mmHg程度となります。"
+    },
+    {
+      "question": "二酸化炭素の運搬について、正しい記述はどれか。",
+      "options": [
+        "約90%がそのままCO₂として血液に溶解する。",
+        "約5%がヘモグロビンなどのタンパク質に結合する。",
+        "炭酸水素イオンとして運ばれるのは約10%である。",
+        "血漿中にも炭酸脱水酵素が存在する。"
+      ],
+      "answer": 1,
+      "explanation": "CO₂の約5%はヘモグロビンなどのタンパク質に結合します。約90%は炭酸水素イオンとなり、約5%はそのままCO₂として血液に溶解します。なお、血漿中には炭酸脱水酵素は存在しません。"
+    },
+    {
+      "question": "肺循環の特徴について、正しくないのはどれか。",
+      "options": [
+        "肺動脈には静脈血が流れている。",
+        "肺循環抵抗は体循環抵抗の約1/5である。",
+        "立位では肺上部の血流が最も多い。",
+        "右心室の発生圧は左心室の1/5程度である。"
+      ],
+      "answer": 2,
+      "explanation": "立位や座位では、心臓より上にある肺上部の血流が少なくなります。心室拡張期には肺胞に押されて閉塞し、血流が途絶することがあります。一方、肺の下部では血管はつねに開口しており血流が多くなります。"
+    },
+    {
+      "question": "換気血流比不均等の調節メカニズムについて、正しい記述はどれか。",
+      "options": [
+        "換気のわるい肺胞では血流が増加する。",
+        "肺細動脈はP_O_2の低下によって拡張する。",
+        "高山病は換気血流比不均等の調節が過剰に働いた結果である。",
+        "換気のよい肺胞への血流は減少する。"
+      ],
+      "answer": 2,
+      "explanation": "換気のわるい肺胞ではP_O_2が低下し、肺細動脈が収縮して血流を減少させます。これにより換気のよい肺胞へ血流をふり分けています。高山病は、この調節メカニズムが肺全体で働くことで肺高血圧を引き起こし、肺水腫につながる可能性があります。"
+    },
+    {
+      "question": "呼吸の神経性調節について、正しくない記述はどれか。",
+      "options": [
+        "呼吸中枢は延髄と橋に存在する。",
+        "横隔膜は頚髄(C4)から出る横隔神経に支配される。",
+        "睡眠中も呼吸は継続する。",
+        "呼吸中枢からの出力は常に意識的にコントロールされる。"
+      ],
+      "answer": 3,
+      "explanation": "呼吸中枢からの出力は通常、自動的に調節されています。意志の力で呼吸の速さや深さを変えることはできますが、ふだんは呼吸を意識せず、睡眠中も呼吸は継続します。"
+    },
+    {
+      "question": "末梢化学受容器の特徴について、正しい記述はどれか。",
+      "options": [
+        "P_CO_2の上昇に最も敏感に反応する。",
+        "頸動脈小体は大動脈小体よりも役割が小さい。",
+        "貧血では強く興奮して呼吸を促進させる。",
+        "P_O_2の低下に反応して呼吸を促進させる。"
+      ],
+      "answer": 3,
+      "explanation": "末梢化学受容器（頸動脈小体と大動脈小体）は、P_O_2の低下に反応して呼吸を促進させます。頸動脈小体の役割のほうが大きく、貧血ではP_O_2は低下しないため興奮は軽度です。"
+    },
+    {
+      "question": "チェイン-ストークス呼吸の特徴として、正しくないのはどれか。",
+      "options": [
+        "無呼吸と1回換気量が漸増・漸減する呼吸を繰り返す。",
+        "呼吸中枢の機能低下や器質的障害によって生じる。",
+        "重篤な中枢神経系の疾患や心不全の末期に出現する。",
+        "代謝性アシドーシスに対する代償機序である。"
+      ],
+      "answer": 3,
+      "explanation": "チェイン-ストークス呼吸は、呼吸中枢の機能低下や器質的障害によって生じ、重篤な中枢神経系の疾患や心不全の末期に出現します。代謝性アシドーシスに対する代償機序として過換気状態になるのはクスマウル呼吸の特徴です。"
+    },
+    {
+      "question": "換気障害の分類について、正しい記述はどれか。",
+      "options": [
+        "閉塞性換気障害は1秒率の上昇が特徴である。",
+        "拘束性換気障害は肺活量の増加が特徴である。",
+        "気管支喘息は拘束性換気障害の代表的疾患である。",
+        "肺線維症は拘束性換気障害の代表的疾患である。"
+      ],
+      "answer": 3,
+      "explanation": "閉塞性換気障害は1秒率の減少が、拘束性換気障害は肺活量の減少が特徴です。気管支喘息は閉塞性換気障害の、肺線維症は拘束性換気障害の代表的疾患です。"
+    },
+    {
+      "question": "拡散障害について、正しい記述はどれか。",
+      "options": [
+        "CO₂の拡散がO₂よりも強く障害される。",
+        "肺気腫ではガス交換面積が増加する。",
+        "間質性肺炎では肺胞壁が薄くなる。",
+        "肺水腫では肺胞と毛細血管壁の距離が増大する。"
+      ],
+      "answer": 3,
+      "explanation": "拡散障害では、CO₂はO₂と比較して拡散係数が大きいため、ほとんど影響を受けません。肺気腫ではガス交換面積が減少し、間質性肺炎では肺胞壁が肥厚します。肺水腫では間質に液体が貯留し、肺胞と毛細血管壁の距離が増大します。"
+    }
+  ];
+
+    let currentQuestion = 0;
+    let score = 0;
+    let userAnswers = [];
+    let shuffledOptions = [];
+
+    function shuffleArray(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    function loadQuestion() {
+      const quizContent = document.getElementById('quiz-content');
+      quizContent.classList.add('fade-out');
+
+      setTimeout(() => {
+        const question = quizData[currentQuestion];
+        document.getElementById('question').textContent = question.question;
+
+        shuffledOptions = shuffleArray([...question.options]);
+        const optionsHtml = shuffledOptions.map((option, index) => `
+          <div class="option" onclick="selectOption(${index})">${option}</div>
+        `).join('');
+
+        document.getElementById('options').innerHTML = optionsHtml;
+        document.getElementById('explanation').style.display = 'none';
+
+        quizContent.classList.remove('fade-out');
+        quizContent.classList.add('fade-in');
+
+        setTimeout(() => {
+          quizContent.classList.remove('fade-in');
+        }, 500);
+      }, 500);
+    }
+
+    function selectOption(index) {
+      const options = document.querySelectorAll('.option');
+      if (options[index].classList.contains('disabled')) {
+        return;
+      }
+
+      options.forEach(option => {
+        option.classList.add('disabled');
+      });
+
+      options[index].classList.add('selected');
+
+      const question = quizData[currentQuestion];
+      const selectedAnswerIndex = question.options.indexOf(shuffledOptions[index]);
+      userAnswers[currentQuestion] = selectedAnswerIndex;
+
+      const explanationEl = document.getElementById('explanation');
+      explanationEl.innerHTML = `
+        <div class="explanation-header">
+          <span class="explanation-icon">💡</span>
+          解説
+        </div>
+        ${question.explanation}
+      `;
+      explanationEl.style.display = 'block';
+
+      if (selectedAnswerIndex === question.answer) {
+        explanationEl.style.backgroundColor = '#e8f5e9';
+        explanationEl.style.borderLeftColor = '#4caf50';
+        options[index].classList.add('correct'); 
+      } else {
+        explanationEl.style.backgroundColor = '#ffebee';
+        explanationEl.style.borderLeftColor = '#f44336';
+      }
+    }
+
+    function nextQuestion() {
+      const selectedOption = document.querySelector('.option.selected');
+      if (selectedOption === null) {
+        alert('選択肢を選んでください');
+        return; 
+      }
+
+      if (currentQuestion < quizData.length - 1) {
+        currentQuestion++;
+        loadQuestion();
+      } else {
+        showResult();
+      }
+    }
+
+    function showResult() {
+      score = userAnswers.reduce((total, answer, index) => 
+        total + (answer === quizData[index].answer ? 1 : 0), 0);
+
+      const resultContainer = document.getElementById('result-container');
+      const quizContainer = document.getElementById('quiz-container');
+      quizContainer.style.display = 'none';
+
+      const percentage = (score / quizData.length) * 100;
+      let resultHtml = `
+        <h2>クイズ結果</h2>
+        <p>正解数: ${score} / ${quizData.length}</p>
+        <p>正答率: ${percentage.toFixed(2)}%</p>
+      `;
+
+      quizData.forEach((question, index) => {
+        const isCorrect = userAnswers[index] === question.answer;
+        resultHtml += `
+          <div class="result-card">
+            <h3>問題 ${index + 1}</h3>
+            <p class="result-status ${isCorrect ? 'correct' : 'incorrect'}">
+              ${isCorrect ? '正解' : '不正解'}
+            </p>
+            <p><strong>質問:</strong> ${question.question}</p>
+            <p><strong>あなたの回答:</strong> ${question.options[userAnswers[index]] || '未回答'}</p>
+            <p><strong>正解:</strong> ${question.options[question.answer]}</p>
+            <p><strong>説明:</strong> ${question.explanation}</p>
+          </div>
+        `;
+      });
+
+      resultHtml += `<button class="nav-button" onclick="restartQuiz()">もう一度挑戦する</button>`;
+      resultContainer.innerHTML = resultHtml;
+
+      if (percentage >= 80) {
+        const attendanceLink = document.getElementById('attendance-link');
+        attendanceLink.style.display = 'block';
+        attendanceLink.innerHTML = `
+          <p>おめでとうございます！80%以上の正答率です。</p>
+          
+        `;
+      }
+    }
+
+    function restartQuiz() {
+      currentQuestion = 0;
+      score = 0;
+      userAnswers = [];
+      shuffledOptions = [];
+      document.getElementById('quiz-container').style.display = 'block';
+      document.getElementById('result-container').innerHTML = '';
+      document.getElementById('attendance-link').style.display = 'none';
+      loadQuestion();
+    }
+
+    loadQuestion();
+  </script>
+</body>
+</html>
