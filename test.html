@@ -126,20 +126,27 @@
       margin-right: 10px;
     }
     .nav-button {
-      background-color: #007aff;
-      color: #fff;
-      border: none;
-      border-radius: 12px;
-      padding: 12px 24px;
-      font-size: 1em;
-      cursor: pointer;
-      transition: background-color 0.3s ease;
-      margin-top: 20px;
-      width: 100%;
-    }
-    .nav-button:hover {
-      background-color: #0056b3;
-    }
+  background: linear-gradient(135deg, #007aff, #5ac8fa); /* グラデーションを追加 */
+  color: #fff;
+  border: none; /* ボーダーを削除 */
+  border-radius: 12px;
+  padding: 12px 24px;
+  font-size: 1em;
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.2s ease; /* トランジションを調整 */
+  margin-top: 20px;
+  width: 100%;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* 影を追加 */
+}
+
+.nav-button:hover {
+  background: linear-gradient(135deg, #005bb5, #4aa0d3); /* ホバー時の色を変更 */
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+}
+
+.nav-button:active {
+  transform: scale(0.98); /* 押したときのアニメーション */
+}
     .result-card {
       margin-bottom: 20px;
     }
@@ -178,7 +185,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>神ズ</h1>
+    <h1>神経クイズ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
