@@ -112,7 +112,7 @@
   border-radius: 12px;
   padding: 15px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  opacity: 0;
+  opacity: 1; /* 修正 */
   transition: opacity 0.3s ease;
 }
 
@@ -188,7 +188,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>神経クイズ</h1>
+    <h1>神経イズ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
@@ -486,6 +486,7 @@
     ${question.explanation}
   `;
   explanationEl.style.display = 'block';
+  explanationEl.style.opacity = '1'; // 修正: 解説を表示する際にopacityを設定
 
   // 正解・不正解のクラスを付与してグラデーションを適用
   if (selectedAnswerIndex === question.answer) {
@@ -497,6 +498,23 @@
     explanationEl.style.borderLeftColor = '#f44336';
     options[index].classList.add('incorrect'); // 不正解時に`incorrect`クラスを追加
   }
+}
+
+function loadQuestion() {
+  const question = quizData[currentQuestion];
+  document.getElementById('question').textContent = question.question;
+
+  shuffledOptions = shuffleArray([...question.options]);
+  const optionsHtml = shuffledOptions.map((option, index) => `
+    <div class="option" onclick="selectOption(${index})">${option}</div>
+  `).join('');
+
+  document.getElementById('options').innerHTML = optionsHtml;
+
+  // 解説のリセット
+  const explanationEl = document.getElementById('explanation');
+  explanationEl.style.display = 'none'; // 解説を非表示に
+  explanationEl.style.opacity = '0'; // 解説のopacityをリセット
 }
 
 function loadQuestion() {
