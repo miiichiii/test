@@ -188,7 +188,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>神経ズ</h1>
+    <h1>神ズ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
@@ -485,12 +485,15 @@
     </div>
     ${question.explanation}
   `;
-  explanationEl.style.display = 'block';
   
+  // 一旦解説を見えないようにしてから表示の遅延を設定
+  explanationEl.style.opacity = '0';
+  explanationEl.style.display = 'block'; // まず表示を「block」にする
+
   // 遅延を設定して解説をフェードイン
   setTimeout(() => {
-    explanationEl.style.opacity = '1';
-  }, 500); // 200msの遅延を設定
+    explanationEl.style.opacity = '1'; // 遅れてopacityを1にする
+  }, 200); // 200msの遅延を設定
 
   // 正解・不正解のクラスを付与してグラデーションを適用
   if (selectedAnswerIndex === question.answer) {
