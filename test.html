@@ -445,29 +445,34 @@
     }
 
     function loadQuestion() {
-      const quizContent = document.getElementById('quiz-content');
-      quizContent.classList.add('fade-out');
+  const quizContent = document.getElementById('quiz-content');
+  const explanationEl = document.getElementById('explanation');
+  
+  quizContent.classList.add('fade-out');
 
-      setTimeout(() => {
-        const question = quizData[currentQuestion];
-        document.getElementById('question').textContent = question.question;
+  setTimeout(() => {
+    const question = quizData[currentQuestion];
+    document.getElementById('question').textContent = question.question;
 
-        shuffledOptions = shuffleArray([...question.options]);
-        const optionsHtml = shuffledOptions.map((option, index) => `
-          <div class="option" onclick="selectOption(${index})">${option}</div>
-        `).join('');
+    shuffledOptions = shuffleArray([...question.options]);
+    const optionsHtml = shuffledOptions.map((option, index) => `
+      <div class="option" onclick="selectOption(${index})">${option}</div>
+    `).join('');
 
-        document.getElementById('options').innerHTML = optionsHtml;
-        document.getElementById('explanation').style.display = 'none';
+    document.getElementById('options').innerHTML = optionsHtml;
 
-        quizContent.classList.remove('fade-out');
-        quizContent.classList.add('fade-in');
+    // 解説のリセット
+    explanationEl.style.opacity = '0';
+    explanationEl.style.display = 'none';
 
-        setTimeout(() => {
-          quizContent.classList.remove('fade-in');
-        }, 500);
-      }, 500);
-    }
+    quizContent.classList.remove('fade-out');
+    quizContent.classList.add('fade-in');
+
+    setTimeout(() => {
+      quizContent.classList.remove('fade-in');
+    }, 500);
+  }, 500);
+}
 
     function selectOption(index) {
       const options = document.querySelectorAll('.option');
