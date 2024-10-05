@@ -71,11 +71,23 @@
       background-color: #007aff;
       color: #fff;
     }
-    .option.disabled background: linear-gradient(135deg, #a8edea, #fed6e3);
+    .option.disabled {
+      background: linear-gradient(135deg, #a8edea, #fed6e3);
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
-
   pointer-events: none;
-    
+      }
+    /* 正解時のグラデーション */
+.option.correct {
+  background: linear-gradient(135deg, #34c759, #a8e6cf); /* 正解のグラデーション */
+  color: #fff;
+}
+
+/* 不正解時のグラデーション */
+.option.incorrect {
+  background: linear-gradient(135deg, #ff3b30, #ff9a8b); /* 不正解のグラデーション */
+  color: #fff;
+}
+
     .option::after {
       content: '';
       position: absolute;
@@ -176,7 +188,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>クイズ</h1>
+    <h1>クイ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
@@ -446,43 +458,42 @@
     }
 
     function selectOption(index) {
-      const options = document.querySelectorAll('.option');
-      if (options[index].classList.contains('disabled')) {
-        return;
-      }
+  const options = document.querySelectorAll('.option');
+  if (options[index].classList.contains('disabled')) {
+    return;
+  }
 
-      options.forEach(option => {
-        option.classList.add('disabled');
-      });
+  options.forEach(option => {
+    option.classList.add('disabled');
+  });
 
-      options[index].classList.add('selected');
+  options[index].classList.add('selected');
 
-      const question = quizData[currentQuestion];
-      const selectedAnswerIndex = question.options.indexOf(shuffledOptions[index]);
-      userAnswers[currentQuestion] = selectedAnswerIndex;
+  const question = quizData[currentQuestion];
+  const selectedAnswerIndex = question.options.indexOf(shuffledOptions[index]);
+  userAnswers[currentQuestion] = selectedAnswerIndex;
 
-      const explanationEl = document.getElementById('explanation');
-      explanationEl.innerHTML = `
-        <div class="explanation-header">
-          <span class="explanation-icon">💡</span>
-          解説
-        </div>
-        ${question.explanation}
-      `;
-      explanationEl.style.display = 'block';
-      setTimeout(() => {
-        explanationEl.style.opacity = '1';
-      }, 100);
+  const explanationEl = document.getElementById('explanation');
+  explanationEl.innerHTML = `
+    <div class="explanation-header">
+      <span class="explanation-icon">💡</span>
+      解説
+    </div>
+    ${question.explanation}
+  `;
+  explanationEl.style.display = 'block';
 
-      if (selectedAnswerIndex === question.answer) {
-        explanationEl.style.backgroundColor = '#e8f5e9';
-        explanationEl.style.borderLeftColor = '#4caf50';
-        options[index].classList.add('correct'); 
-      } else {
-        explanationEl.style.backgroundColor = '#ffebee';
-        explanationEl.style.borderLeftColor = '#f44336';
-      }
-    }
+  // 正解・不正解に応じてクラスを追加
+  if (selectedAnswerIndex === question.answer) {
+    explanationEl.style.backgroundColor = '#e8f5e9';
+    explanationEl.style.borderLeftColor = '#4caf50';
+    options[index].classList.add('correct'); // 正解時に`correct`クラスを追加
+  } else {
+    explanationEl.style.backgroundColor = '#ffebee';
+    explanationEl.style.borderLeftColor = '#f44336';
+    options[index].classList.add('incorrect'); // 不正解時に`incorrect`クラスを追加
+  }
+}
 
     function nextQuestion() {
       const selectedOption = document.querySelector('.option.selected');
