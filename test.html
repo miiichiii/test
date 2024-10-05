@@ -72,10 +72,11 @@
       color: #fff;
     }
     .option.disabled {
-      opacity: 0.5;
-      cursor: default;
-      pointer-events: none;
-    }
+  background-color: rgba(200, 200, 200, 0.5); /* 背景色の透過度を調整 */
+  color: #333; /* テキストの色を維持 */
+  cursor: default;
+  pointer-events: none;
+}
     .option::after {
       content: '';
       position: absolute;
