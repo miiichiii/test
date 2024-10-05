@@ -46,19 +46,21 @@
       gap: 15px;
     }
     .option {
-      background-color: #f5f5f7;
-      border: 2px solid #007aff;
-      border-radius: 12px;
-      padding: 15px;
-      font-size: 1em;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      text-align: center;
-      position: relative;
-      overflow: hidden;
+      background-color: rgba(255, 255, 255, 0.7); /* 半透明で背景を変更 */
+  border: 2px solid #007aff; /* ボーダーの色を強調 */
+  border-radius: 16px; /* 角を丸くする */
+  padding: 15px;
+  font-size: 1em;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* シャドウを追加 */
     }
     .option:hover {
-      background-color: #e8e8ed;
+      background-color: rgba(0, 122, 255, 0.1); /* ホバー時に色を変える */
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2); /* シャドウを強調 */
     }
     .option.selected {
       background-color: #007aff;
@@ -81,7 +83,7 @@
       transition: opacity 0.3s;
     }
     .option:active::after {
-      opacity: 1;
+      transform: scale(0.98); /* 押したときのアニメーション */
     }
     @keyframes fadeOut {
       from { opacity: 1; transform: translateY(0); }
@@ -176,7 +178,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>神経イズ</h1>
+    <h1>神経ズ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
