@@ -73,6 +73,8 @@
     }
     .option.disabled background: linear-gradient(135deg, #a8edea, #fed6e3);
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+    cursor: default;
+  pointer-events: none;
     
     .option::after {
       content: '';
@@ -174,7 +176,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>神経クイズ</h1>
+    <h1>神クイズ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
