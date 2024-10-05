@@ -476,7 +476,7 @@
   const selectedAnswerIndex = question.options.indexOf(shuffledOptions[index]);
   userAnswers[currentQuestion] = selectedAnswerIndex;
 
-  // 解説の表示
+  // 解説の表示内容を設定
   const explanationEl = document.getElementById('explanation');
   explanationEl.innerHTML = `
     <div class="explanation-header">
@@ -486,7 +486,11 @@
     ${question.explanation}
   `;
   explanationEl.style.display = 'block';
-  explanationEl.style.opacity = '1'; // 修正: 解説を表示する際にopacityを設定
+  
+  // 遅延を設定して解説をフェードイン
+  setTimeout(() => {
+    explanationEl.style.opacity = '1';
+  }, 200); // 200msの遅延を設定
 
   // 正解・不正解のクラスを付与してグラデーションを適用
   if (selectedAnswerIndex === question.answer) {
