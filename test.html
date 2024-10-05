@@ -18,9 +18,15 @@
       margin: 0;
     }
     .container {
-      max-width: 800px;
-      margin: 0 auto;
-    }
+  max-width: 800px;
+  margin: 0 auto; /* 自動的に水平中央に配置 */
+  display: flex;
+  flex-direction: column;
+  align-items: center; /* 子要素を中央に配置 */
+  justify-content: center; /* 垂直方向の中央配置 */
+  height: 100vh; /* コンテナの高さを画面全体に */
+  padding: 20px;
+}
     h1, h2 {
   font-family: 'Noto Sans JP', sans-serif; /* フォントをNoto Sans JPに変更 */
   font-weight: 700; /* 太さを設定 */
