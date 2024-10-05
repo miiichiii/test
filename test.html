@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@700&display=swap" rel="stylesheet">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>神経の構造クイズ</title>
@@ -21,11 +22,9 @@
       margin: 0 auto;
     }
     h1, h2 {
-      font-size: 2.5em;
-      margin-bottom: 30px;
-      text-align: center;
-      color: #1d1d1f;
-    }
+  font-family: 'Noto Sans JP', sans-serif; /* フォントをNoto Sans JPに変更 */
+  font-weight: 700; /* 太さを設定 */
+}
     .quiz-container, .result-card {
   background-color: rgba(255, 255, 255, 0.2); /* 背景に少し透明感を加える */
   backdrop-filter: blur(10px); /* 背景をぼかす */
@@ -185,7 +184,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>神経クイズ</h1>
+    <h1>クイズ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
