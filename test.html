@@ -117,6 +117,8 @@
   border-radius: 12px; /* 角を丸くする */
   padding: 15px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* 柔らかい影 */
+  opacity: 0; /* 初期状態を透明に */
+  transition: opacity 0.3s ease; /* 0.3秒の遅延でフェードイン */
 }
 
 .explanation-header {
@@ -191,7 +193,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>クズ</h1>
+    <h1>神経クいズ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
@@ -492,6 +494,9 @@
         ${question.explanation}
       `;
       explanationEl.style.display = 'block';
+      setTimeout(() => {
+    explanationEl.style.opacity = '1';
+  }, 0); 
 
       if (selectedAnswerIndex === question.answer) {
         explanationEl.style.backgroundColor = '#e8f5e9';
