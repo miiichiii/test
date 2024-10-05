@@ -19,26 +19,26 @@
     }
     .container {
   max-width: 800px;
-  margin: 0 auto; /* 自動的に水平中央に配置 */
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  align-items: center; /* 子要素を中央に配置 */
-  justify-content: center; /* 垂直方向の中央配置 */
-  height: 100vh; /* コンテナの高さを画面全体に */
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
   padding: 20px;
 }
     h1, h2 {
-  font-family: 'Noto Sans JP', sans-serif; /* フォントをNoto Sans JPに変更 */
-  font-weight: 700; /* 太さを設定 */
+  font-family: 'Noto Sans JP', sans-serif;
+  font-weight: 700;
 }
     .quiz-container, .result-card {
-  background-color: rgba(255, 255, 255, 0.2); /* 背景に少し透明感を加える */
-  backdrop-filter: blur(10px); /* 背景をぼかす */
-  border-radius: 16px; /* 角を丸く */
+  background-color: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
   padding: 20px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2); /* シャドウを強める */
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   margin-bottom: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.3); /* 軽い枠線 */
+  border: 1px solid rgba(255, 255, 255, 0.3);
     }
     .question {
       font-size: 1.3em;
@@ -51,20 +51,20 @@
       gap: 15px;
     }
     .option {
-      background-color: rgba(255, 255, 255, 0.7); /* 半透明で背景を変更 */
-  border: none; /* ボーダーをなくす */
-  border-radius: 16px; /* 角を丸くする */
+      background-color: rgba(255, 255, 255, 0.7);
+  border: none;
+  border-radius: 16px;
   padding: 15px;
   font-size: 1em;
   cursor: pointer;
-  transition: background 0.3s ease 0.1s, transform 0.3s ease; /* 遅延を0.1秒に設定 */
+  transition: background 0.3s ease 0.1s, transform 0.3s ease;
   text-align: center;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* シャドウを追加 */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     }
     .option:hover {
-      background: linear-gradient(135deg, #a8edea, #fed6e3); /* ホバー時の背景グラデーション */
+      background: linear-gradient(135deg, #a8edea, #fed6e3);
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
     }
     .option.selected {
@@ -88,37 +88,20 @@
       transition: opacity 0.3s;
     }
     .option:active::after {
-      transform: scale(0.98); /* 押したときのアニメーション */
-    }
-    @keyframes fadeOut {
-      from { opacity: 1; transform: translateY(0); }
-      to { opacity: 0; transform: translateY(-20px); }
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .fade-out {
-      animation: fadeOut 0.2s ease-out forwards;
-    }
-    .fade-in {
-      animation: fadeIn 0.2s ease-out forwards;
-    }
-    #quiz-content {
-      transition: opacity 0.2s ease-out, transform 0.5s ease-out;
+      transform: scale(0.98);
     }
     .explanation {
   margin-top: 20px;
   font-size: 1em;
   color: #333;
-  background-color: rgba(255, 255, 255, 0.8); /* 半透明で背景を設定 */
-  backdrop-filter: blur(10px); /* 背景をぼかす */
+  background-color: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
   border-left: 5px solid #4caf50;
-  border-radius: 12px; /* 角を丸くする */
+  border-radius: 12px;
   padding: 15px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* 柔らかい影 */
-  opacity: 0; /* 初期状態を透明に */
-  transition: opacity 0.3s ease; /* 0.3秒の遅延でフェードイン */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
 .explanation-header {
@@ -134,26 +117,26 @@
   margin-right: 10px;
 }
     .nav-button {
-  background: linear-gradient(135deg, #007aff, #5ac8fa); /* グラデーションを追加 */
+  background: linear-gradient(135deg, #007aff, #5ac8fa);
   color: #fff;
-  border: none; /* ボーダーを削除 */
+  border: none;
   border-radius: 12px;
   padding: 12px 24px;
   font-size: 1em;
   cursor: pointer;
-  transition: background 0.3s ease, transform 0.2s ease; /* トランジションを調整 */
+  transition: background 0.3s ease, transform 0.2s ease;
   margin-top: 20px;
   width: 100%;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* 影を追加 */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 .nav-button:hover {
-  background: linear-gradient(135deg, #005bb5, #4aa0d3); /* ホバー時の色を変更 */
+  background: linear-gradient(135deg, #005bb5, #4aa0d3);
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
 }
 
 .nav-button:active {
-  transform: scale(0.98); /* 押したときのアニメーション */
+  transform: scale(0.98);
 }
     .result-card {
       margin-bottom: 20px;
@@ -193,7 +176,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>神経イズ</h1>
+    <h1>神経クイズ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
@@ -205,6 +188,7 @@
     <div id="result-container"></div>
     <div id="attendance-link"></div>
   </div>
+  
   
   <script>
     const quizData = [
@@ -431,7 +415,7 @@
 ]
 ;
 
-    let currentQuestion = 0;
+      let currentQuestion = 0;
     let score = 0;
     let userAnswers = [];
     let shuffledOptions = [];
@@ -445,26 +429,21 @@
     }
 
     function loadQuestion() {
-  const quizContent = document.getElementById('quiz-content');
-  const explanationEl = document.getElementById('explanation');
-  
-  // 選択肢のフェードを削除
-  setTimeout(() => {
-    const question = quizData[currentQuestion];
-    document.getElementById('question').textContent = question.question;
+      const question = quizData[currentQuestion];
+      document.getElementById('question').textContent = question.question;
 
-    shuffledOptions = shuffleArray([...question.options]);
-    const optionsHtml = shuffledOptions.map((option, index) => `
-      <div class="option" onclick="selectOption(${index})">${option}</div>
-    `).join('');
+      shuffledOptions = shuffleArray([...question.options]);
+      const optionsHtml = shuffledOptions.map((option, index) => `
+        <div class="option" onclick="selectOption(${index})">${option}</div>
+      `).join('');
 
-    document.getElementById('options').innerHTML = optionsHtml;
+      document.getElementById('options').innerHTML = optionsHtml;
 
-    // 解説のリセット
-    explanationEl.style.opacity = '0';
-    explanationEl.style.display = 'none';
-  }, 500);
-}
+      // 解説のリセット
+      const explanationEl = document.getElementById('explanation');
+      explanationEl.style.opacity = '0';
+      explanationEl.style.display = 'none';
+    }
 
     function selectOption(index) {
       const options = document.querySelectorAll('.option');
@@ -492,9 +471,8 @@
       `;
       explanationEl.style.display = 'block';
       setTimeout(() => {
-    explanationEl.style.opacity = '1';
-  }, 100);
-  ; 
+        explanationEl.style.opacity = '1';
+      }, 100);
 
       if (selectedAnswerIndex === question.answer) {
         explanationEl.style.backgroundColor = '#e8f5e9';
