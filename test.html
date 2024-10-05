@@ -193,7 +193,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>神経クイズ</h1>
+    <h1>神経イズ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
@@ -448,7 +448,7 @@
   const quizContent = document.getElementById('quiz-content');
   const explanationEl = document.getElementById('explanation');
   
-
+  // 選択肢のフェードを削除
   setTimeout(() => {
     const question = quizData[currentQuestion];
     document.getElementById('question').textContent = question.question;
@@ -463,13 +463,6 @@
     // 解説のリセット
     explanationEl.style.opacity = '0';
     explanationEl.style.display = 'none';
-
-    quizContent.classList.remove('fade-out');
-    quizContent.classList.add('fade-in');
-
-    setTimeout(() => {
-      quizContent.classList.remove('fade-in');
-    }, 500);
   }, 500);
 }
 
