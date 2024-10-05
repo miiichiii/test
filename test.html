@@ -47,7 +47,7 @@
     }
     .option {
       background-color: rgba(255, 255, 255, 0.7); /* 半透明で背景を変更 */
-  border: 2px solid #007aff; /* ボーダーの色を強調 */
+  border: none; /* ボーダーをなくす */
   border-radius: 16px; /* 角を丸くする */
   padding: 15px;
   font-size: 1em;
@@ -59,8 +59,8 @@
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* シャドウを追加 */
     }
     .option:hover {
-      background-color: rgba(0, 122, 255, 0.1); /* ホバー時に色を変える */
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2); /* シャドウを強調 */
+      background: linear-gradient(135deg, #a8edea, #fed6e3); /* ホバー時の背景グラデーション */
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
     }
     .option.selected {
       background-color: #007aff;
@@ -178,7 +178,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>神経ズ</h1>
+    <h1>神ズ</h1>
     <div id="quiz-container" class="quiz-container">
       <div id="quiz-content">
         <div id="question" class="question"></div>
