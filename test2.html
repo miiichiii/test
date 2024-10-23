@@ -126,6 +126,7 @@
             font-size: 48px;
             font-weight: 300;
             margin: 20px 0;
+            color: #2d3748;
         }
         .score-details {
             font-size: 18px;
@@ -144,6 +145,36 @@
         }
         .retry-button:hover {
             background: #333;
+            transform: translateY(-1px);
+        }
+        .success-message {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f0fff4;
+            border: 2px solid #48bb78;
+            border-radius: 12px;
+            animation: slideDown 0.3s ease;
+        }
+        .success-message h2 {
+            color: #2f855a;
+            margin: 0 0 10px 0;
+        }
+        .success-message p {
+            color: #276749;
+            margin: 0 0 20px 0;
+        }
+        .success-link {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #48bb78;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        .success-link:hover {
+            background: #38a169;
             transform: translateY(-1px);
         }
         @keyframes slideDown {
@@ -239,13 +270,31 @@
             };
 
             if (isCompleted) {
+                const percentage = Math.round((score / questions.length) * 100);
+                const passedThreshold = percentage >= 80;
+
                 return (
                     <div className="container results">
                         <h1>クイズ完了！</h1>
-                        <div className="score">{Math.round((score / questions.length) * 100)}%</div>
+                        <div className="score">{percentage}%</div>
                         <div className="score-details">
                             {score} / {questions.length} 問正解
                         </div>
+                        
+                        {passedThreshold && (
+                            <div className="success-message">
+                                <h2>合格おめでとうございます！🎉</h2>
+                                <p>素晴らしい成績です。次のステップに進みましょう。</p>
+                                <a 
+                                    href="https://forms.gle/YjUGNCwPWRVLP6mB9"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="success-link"
+                                >
+                                    次のステップへ進む →
+                                </a>
+                            </div>
+                        )}
                         
                         {questions.map((question, qIndex) => {
                             const answer = answers[qIndex];
