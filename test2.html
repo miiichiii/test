@@ -7,6 +7,7 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
 
@@ -19,6 +20,7 @@
             line-height: 1.6;
             min-height: 100vh;
         }
+
         .container {
             max-width: 800px;
             margin: 40px auto;
@@ -30,22 +32,27 @@
                 0 1px 3px rgba(0,0,0,0.05);
             backdrop-filter: blur(10px);
         }
+
         .question-card {
-            margin-bottom: 30px;
-            animation: fadeIn 0.5s ease;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: slideUpFade 0.6s ease forwards;
         }
+
         .question-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 24px;
         }
+
         .question-number {
             font-size: 28px;
             font-weight: 600;
             color: #333;
             position: relative;
         }
+
         .question-number::after {
             content: '';
             position: absolute;
@@ -57,11 +64,13 @@
             border-radius: 2px;
             animation: slideIn 0.5s ease;
         }
+
         .progress-count {
             font-size: 16px;
             color: #666;
             font-weight: 500;
         }
+
         .question-text {
             font-size: 22px;
             margin-bottom: 30px;
@@ -69,11 +78,13 @@
             line-height: 1.4;
             animation: slideUp 0.5s ease;
         }
+
         .options {
             display: flex;
             flex-direction: column;
             gap: 16px;
         }
+
         .option-button {
             padding: 20px 24px;
             border: 2px solid #eef2ff;
@@ -88,24 +99,55 @@
             font-weight: 500;
             box-shadow: 0 2px 4px rgba(0,0,0,0.02);
         }
+
         .option-button:hover:not(:disabled) {
             border-color: #000;
             transform: translateY(-2px) scale(1.01);
             box-shadow: 0 8px 20px rgba(0,0,0,0.08);
         }
+
         .option-button:active:not(:disabled) {
             transform: translateY(0) scale(0.99);
         }
+
+        .option-button::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: radial-gradient(circle, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0) 100%);
+            transform: translate(-50%, -50%);
+            transition: width 0.5s ease, height 0.5s ease;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
         .correct {
             background: #ecfdf5;
             border-color: #34d399;
-            animation: pulseGreen 0.5s ease;
+            animation: correctAnswer 0.6s ease;
         }
+
+        .correct::before {
+            width: 300%;
+            height: 300%;
+            background: radial-gradient(circle, rgba(52,211,153,0.2) 0%, rgba(52,211,153,0) 100%);
+        }
+
         .incorrect {
             background: #fef2f2;
             border-color: #f87171;
-            animation: pulseRed 0.5s ease;
+            animation: incorrectAnswer 0.6s ease;
         }
+
+        .incorrect::before {
+            width: 300%;
+            height: 300%;
+            background: radial-gradient(circle, rgba(248,113,113,0.2) 0%, rgba(248,113,113,0) 100%);
+        }
+
         .explanation {
             margin-top: 24px;
             padding: 24px;
@@ -116,6 +158,7 @@
             border-left: 4px solid #000;
             animation: slideIn 0.5s ease;
         }
+
         .next-button {
             width: 100%;
             padding: 18px;
@@ -131,24 +174,30 @@
             position: relative;
             overflow: hidden;
         }
+
         .next-button:hover {
             background: #333;
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(0,0,0,0.15);
         }
+
         .next-button::after {
             content: '';
             position: absolute;
-            width: 30px;
-            height: 200px;
-            background: rgba(255,255,255,0.2);
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(
+                45deg,
+                transparent,
+                rgba(255,255,255,0.1),
+                transparent
+            );
             transform: rotate(45deg);
-            left: -100px;
-            transition: all 0.3s ease;
+            animation: shimmer 2s infinite;
         }
-        .next-button:hover::after {
-            left: 120%;
-        }
+
         .progress-bar {
             width: 100%;
             height: 8px;
@@ -157,17 +206,20 @@
             margin-bottom: 36px;
             overflow: hidden;
         }
+
         .progress {
             height: 100%;
             background: linear-gradient(90deg, #000 0%, #333 100%);
             transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
             border-radius: 4px;
         }
+
         .results {
             text-align: center;
             padding: 40px 0;
             animation: fadeIn 0.5s ease;
         }
+
         .score {
             font-size: 72px;
             font-weight: 700;
@@ -176,6 +228,7 @@
             position: relative;
             display: inline-block;
         }
+
         .score::after {
             content: '';
             position: absolute;
@@ -185,39 +238,16 @@
             bottom: -8px;
             left: -10%;
             border-radius: 4px;
-            animation: slideIn 0.8s ease;
+            transform: scaleX(0);
+            animation: scoreLineReveal 1s ease forwards 0.5s;
         }
-        .answer-icon {
-            position: absolute;
-            right: 24px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 24px;
-            opacity: 0;
-            animation: fadeIn 0.3s ease forwards;
+
+        .score-details {
+            font-size: 18px;
+            color: #666;
+            margin-bottom: 30px;
         }
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        @keyframes slideIn {
-            from { transform: translateX(-20px); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        @keyframes slideUp {
-            from { transform: translateY(20px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-        @keyframes pulseGreen {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.02); }
-            100% { transform: scale(1); }
-        }
-        @keyframes pulseRed {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.02); }
-            100% { transform: scale(1); }
-        }
+
         .retry-button {
             background: #000;
             color: white;
@@ -229,24 +259,24 @@
             cursor: pointer;
             transition: all 0.3s ease;
             margin-top: 30px;
-            position: relative;
-            overflow: hidden;
         }
+
         .retry-button:hover {
             background: #333;
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(0,0,0,0.15);
         }
+
         .success-message {
             margin: 30px 0;
             padding: 30px;
             background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
-            border: none;
             border-radius: 20px;
             animation: fadeIn 0.8s ease;
             position: relative;
             overflow: hidden;
         }
+
         .success-message::before {
             content: '🎉';
             font-size: 100px;
@@ -256,6 +286,7 @@
             opacity: 0.1;
             transform: rotate(15deg);
         }
+
         .success-link {
             display: inline-block;
             padding: 16px 32px;
@@ -266,13 +297,71 @@
             font-weight: 600;
             transition: all 0.3s ease;
             margin-top: 20px;
-            position: relative;
-            overflow: hidden;
         }
+
         .success-link:hover {
             background: #333;
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }
+
+        @keyframes slideUpFade {
+            0% {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes correctAnswer {
+            0% { transform: scale(1); }
+            40% { transform: scale(1.05); }
+            60% { transform: scale(0.98); }
+            100% { transform: scale(1); }
+        }
+
+        @keyframes incorrectAnswer {
+            0%, 100% { transform: scale(1); }
+            20%, 60% { transform: translateX(-4px); }
+            40%, 80% { transform: translateX(4px); }
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(-20px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        @keyframes shimmer {
+            0% { transform: translateX(-100%) rotate(45deg); }
+            100% { transform: translateX(100%) rotate(45deg); }
+        }
+
+        @keyframes scoreLineReveal {
+            from { transform: scaleX(0); }
+            to { transform: scaleX(1); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .answer-icon {
+            position: absolute;
+            right: 24px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 24px;
+            opacity: 0;
+            animation: fadeIn 0.3s ease forwards;
         }
     </style>
 </head>
@@ -280,13 +369,14 @@
     <div id="root"></div>
 
     <script type="text/babel">
-       function QuizApp() {
+        function QuizApp() {
             const [currentQuestion, setCurrentQuestion] = React.useState(0);
             const [selectedAnswer, setSelectedAnswer] = React.useState(null);
             const [score, setScore] = React.useState(0);
             const [showExplanation, setShowExplanation] = React.useState(false);
             const [isCompleted, setIsCompleted] = React.useState(false);
             const [answers, setAnswers] = React.useState([]);
+            const [isAnimating, setIsAnimating] = React.useState(false);
 
             const questions = [
                 {
@@ -313,25 +403,41 @@
                 }
             ];
 
+            const triggerCorrectEffect = () => {
+                confetti({
+                    particleCount: 100,
+                    spread: 70,
+                    origin: { y: 0.6 }
+                });
+            };
+
             const handleAnswer = (index) => {
                 if (selectedAnswer !== null) return;
                 setSelectedAnswer(index);
                 setShowExplanation(true);
                 const isCorrect = index === questions[currentQuestion].answer;
+                
                 if (isCorrect) {
                     setScore(score + 1);
+                    triggerCorrectEffect();
                 }
+                
                 setAnswers([...answers, { questionIndex: currentQuestion, selected: index, isCorrect }]);
             };
 
             const handleNext = () => {
-                if (currentQuestion < questions.length - 1) {
-                    setCurrentQuestion(currentQuestion + 1);
-                    setSelectedAnswer(null);
-                    setShowExplanation(false);
-                } else {
-                    setIsCompleted(true);
-                }
+                setIsAnimating(true);
+                
+                setTimeout(() => {
+                    if (currentQuestion < questions.length - 1) {
+                        setCurrentQuestion(currentQuestion + 1);
+                        setSelectedAnswer(null);
+                        setShowExplanation(false);
+                    } else {
+                        setIsCompleted(true);
+                    }
+                    setIsAnimating(false);
+                }, 300);
             };
 
             const handleRetry = () => {
@@ -344,130 +450,3 @@
             };
 
             const getButtonClass = (index) => {
-                if (selectedAnswer === null) return "option-button";
-                if (index === questions[currentQuestion].answer) return "option-button correct";
-                if (index === selectedAnswer) return "option-button incorrect";
-                return "option-button";
-            };
-
-            if (isCompleted) {
-                const percentage = Math.round((score / questions.length) * 100);
-                const passedThreshold = percentage >= 80;
-
-                return (
-                    <div className="container results">
-                        <h1>クイズ完了！</h1>
-                        <div className="score">{percentage}%</div>
-                        <div className="score-details">
-                            {score} / {questions.length} 問正解
-                        </div>
-                        
-                        {passedThreshold && (
-                            <div className="success-message">
-                                <h2>合格おめでとうございます！</h2>
-                                <p>素晴らしい成績です。次のステップに進みましょう。</p>
-                                <a 
-                                    href="https://forms.gle/YjUGNCwPWRVLP6mB9"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="success-link"
-                                >
-                                    次のステップへ進む →
-                                </a>
-                            </div>
-                        )}
-                        
-                        {questions.map((question, qIndex) => {
-                            const answer = answers[qIndex];
-                            return (
-                                <div key={qIndex} className="question-card">
-                                    <div className="question-text">
-                                        {qIndex + 1}. {question.question}
-                                    </div>
-                                    <div className="options">
-                                        {question.options.map((option, oIndex) => (
-                                            <div
-                                                key={oIndex}
-                                                className={`option-button ${
-                                                    oIndex === question.answer 
-                                                        ? 'correct'
-                                                        : answer.selected === oIndex && 'incorrect'
-                                                }`}
-                                            >
-                                                {option}
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <div className="explanation">
-                                        {question.explanation}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                        
-                        <button className="retry-button" onClick={handleRetry}>
-                            もう一度挑戦する
-                        </button>
-                    </div>
-                );
-            }
-
-            return (
-                <div className="container">
-                    <div className="progress-bar">
-                        <div 
-                            className="progress" 
-                            style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }}
-                        />
-                    </div>
-                    
-                    <div className="question-card">
-                        <div className="question-header">
-                            <div className="question-number">Question {currentQuestion + 1}</div>
-                            <div className="progress-count">{currentQuestion + 1} / {questions.length}</div>
-                        </div>
-                        
-                        <div className="question-text">
-                            {questions[currentQuestion].question}
-                        </div>
-                        
-                        <div className="options">
-                            {questions[currentQuestion].options.map((option, index) => (
-                                <button
-                                    key={index}
-                                    className={getButtonClass(index)}
-                                    onClick={() => handleAnswer(index)}
-                                    disabled={selectedAnswer !== null}
-                                >
-                                    {option}
-                                    {selectedAnswer !== null && index === questions[currentQuestion].answer && (
-                                        <span className="answer-icon">✓</span>
-                                    )}
-                                    {selectedAnswer === index && index !== questions[currentQuestion].answer && (
-                                        <span className="answer-icon">×</span>
-                                    )}
-                                </button>
-                            ))}
-                        </div>
-
-                        {showExplanation && (
-                            <div className="explanation">
-                                {questions[currentQuestion].explanation}
-                            </div>
-                        )}
-
-                        {selectedAnswer !== null && (
-                            <button className="next-button" onClick={handleNext}>
-                                {currentQuestion === questions.length - 1 ? '結果を見る' : '次の問題へ'}
-                            </button>
-                        )}
-                    </div>
-                </div>
-            );
-        }
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<QuizApp />);
-    </script>
-</body>
-</html>
