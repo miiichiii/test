@@ -3,13 +3,22 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Check, X, RotateCcw } from 'lucide-react';
 
 const QuizApp = () => {
-  const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [selectedAnswer, setSelectedAnswer] = useState(null);
-  const [score, setScore] = useState(0);
-  const [isCompleted, setIsCompleted] = useState(false);
-  const [answers, setAnswers] = useState([]);
+  const initialState = {
+    currentQuestion: 0,
+    selectedAnswer: null,
+    score: 0,
+    isCompleted: false,
+    answers: [],
+    showCelebration: false,
+  };
+
+  const [currentQuestion, setCurrentQuestion] = useState(initialState.currentQuestion);
+  const [selectedAnswer, setSelectedAnswer] = useState(initialState.selectedAnswer);
+  const [score, setScore] = useState(initialState.score);
+  const [isCompleted, setIsCompleted] = useState(initialState.isCompleted);
+  const [answers, setAnswers] = useState(initialState.answers);
   const [isMobile, setIsMobile] = useState(false);
-  const [showCelebration, setShowCelebration] = useState(false);
+  const [showCelebration, setShowCelebration] = useState(initialState.showCelebration);
 
   const neonColors = [
     '#ff00ff',
@@ -80,12 +89,21 @@ const QuizApp = () => {
     }
   };
 
+  const handleRetry = () => {
+    setCurrentQuestion(initialState.currentQuestion);
+    setSelectedAnswer(initialState.selectedAnswer);
+    setScore(initialState.score);
+    setIsCompleted(initialState.isCompleted);
+    setAnswers(initialState.answers);
+    setShowCelebration(initialState.showCelebration);
+  };
+
   const Particle = ({ angle, color }) => (
     <motion.div
       initial={{ x: 0, y: 0, scale: 1, opacity: 1 }}
       animate={{ 
-        x: Math.cos(angle) * (100 + Math.random() * 200),
-        y: Math.sin(angle) * (100 + Math.random() * 200),
+        x: Math.cos(angle) * 100,
+        y: Math.sin(angle) * 100,
         scale: 0,
         opacity: 0
       }}
@@ -93,44 +111,30 @@ const QuizApp = () => {
       className="absolute w-2 h-2 rounded-full"
       style={{ 
         backgroundColor: color,
-        boxShadow: `0 0 10px ${color}, 0 0 20px ${color}, 0 0 30px ${color}`,
-        filter: 'brightness(1.5)'
+        boxShadow: `0 0 10px ${color}`
       }}
     />
   );
 
-  const Celebration = () => {
-    useEffect(() => {
-      const timer = setTimeout(() => {
-        setShowCelebration(false);
-      }, 10000);
-      return () => clearTimeout(timer);
-    }, []);
+  const Celebration = () => (
+    <motion.div className="fixed inset-0 pointer-events-none">
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+        {Array.from({ length: 50 }).map((_, i) => (
+          <Particle 
+            key={i}
+            angle={(Math.PI * 2 * i) / 50}
+            color={neonColors[i % neonColors.length]}
+          />
+        ))}
+      </div>
+    </motion.div>
+  );
 
-    return (
-      <motion.div 
-        initial={{ opacity: 1 }}
-        animate={{ opacity: 0 }}
-        transition={{ duration: 1, delay: 9 }}
-        className="fixed inset-0 pointer-events-none"
-      >
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-          {Array.from({ length: 50 }).map((_, i) => (
-            <Particle 
-              key={i}
-              angle={(Math.PI * 2 * i) / 50}
-              color={neonColors[i % neonColors.length]}
-            />
-          ))}
-        </div>
-      </motion.div>
-    );
-  };
-      if (isCompleted) {
+  if (isCompleted) {
     const isPerfectScore = score === questions.length;
 
     return (
-      <div className="min-h-screen w-full bg-white flex flex-col items-center py-8 px-4 sm:p-8 overflow-hidden">
+      <div className="min-h-screen w-full bg-white flex flex-col items-center py-8 px-4">
         {showCelebration && <Celebration />}
         <div className="w-full max-w-2xl">
           <motion.div 
@@ -138,9 +142,7 @@ const QuizApp = () => {
             animate={{ opacity: 1, y: 0 }}
             className="text-center space-y-4 mb-8"
           >
-            <h1 className={`text-3xl sm:text-4xl font-light tracking-tight ${
-              isPerfectScore ? 'animate-pulse' : ''
-            }`}>
+            <h1 className="text-3xl font-light tracking-tight">
               {isPerfectScore ? "Perfect Score! 🎉" : "Quiz Complete"}
             </h1>
             <motion.div 
@@ -150,9 +152,7 @@ const QuizApp = () => {
                 transition: { repeat: Infinity, duration: 2 }
               } : {}}
             >
-              <span className={`text-5xl sm:text-6xl font-light ${
-                isPerfectScore ? 'text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600' : ''
-              }`}>
+              <span className="text-5xl font-light">
                 {Math.round((score / questions.length) * 100)}%
               </span>
               <span className="text-gray-500">
@@ -218,9 +218,9 @@ const QuizApp = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.5 }}
-            onClick={() => window.location.reload()}
+            onClick={handleRetry}
             className="w-full mt-8 py-4 px-6 bg-black text-white text-sm tracking-widest
-                     hover:bg-gray-900 transition-colors flex items-center justify-center gap-2"
+                     hover:bg-gray-900 flex items-center justify-center gap-2"
           >
             <RotateCcw className="w-4 h-4" />
             RETRY QUIZ
@@ -231,92 +231,93 @@ const QuizApp = () => {
   }
 
   return (
-    <div className="min-h-screen w-full bg-white flex flex-col items-center justify-center px-4 py-8 sm:p-8">
+    <div className="min-h-screen w-full bg-white flex flex-col items-center justify-center px-4 py-8">
       <div className="w-full max-w-2xl">
-        <div className="relative w-full h-1 bg-gray-100 mb-8 sm:mb-12">
+        <div className="relative w-full h-1 bg-gray-100 mb-8">
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }}
-            transition={{ duration: 0.5 }}
             className="absolute top-0 left-0 h-full bg-black"
           />
         </div>
 
-        <motion.div
-          key={currentQuestion}
-          initial={{ opacity: 0, x: isMobile ? 20 : 50 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5 }}
-          className="space-y-8"
-        >
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
-            <h1 className="text-2xl sm:text-4xl font-light tracking-tight">
-              Question {currentQuestion + 1}
-            </h1>
-            <p className="text-sm text-gray-500">
-              {currentQuestion + 1} / {questions.length}
-            </p>
-          </div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={currentQuestion}
+            initial={{ opacity: 0, x: isMobile ? 20 : 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: isMobile ? -20 : -50 }}
+            className="space-y-8"
+          >
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+              <h1 className="text-2xl sm:text-4xl font-light tracking-tight">
+                Question {currentQuestion + 1}
+              </h1>
+              <p className="text-sm text-gray-500">
+                {currentQuestion + 1} / {questions.length}
+              </p>
+            </div>
 
-          <div className="space-y-6">
-            <p className="text-lg sm:text-xl leading-relaxed">
-              {questions[currentQuestion].question}
-            </p>
+            <div className="space-y-6">
+              <p className="text-lg sm:text-xl leading-relaxed">
+                {questions[currentQuestion].question}
+              </p>
 
-            <div className="space-y-3">
-              {questions[currentQuestion].options.map((option, index) => (
-                <motion.button
-                  key={index}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                  onClick={() => handleAnswer(index)}
-                  disabled={selectedAnswer !== null}
-                  className={`w-full p-4 sm:p-6 text-left border text-base sm:text-lg
-                           transition-all touch-manipulation select-none rounded-lg
-                           ${selectedAnswer === null 
-                             ? 'border-gray-200 hover:border-black active:bg-gray-50' 
-                             : index === questions[currentQuestion].answer
-                               ? 'border-green-500 bg-green-50'
-                               : selectedAnswer === index
-                                 ? 'border-red-500 bg-red-50'
-                                 : 'border-gray-200'}`}
-                >
-                  {option}
-                </motion.button>
-              ))}
+              <div className="space-y-3">
+                {questions[currentQuestion].options.map((option, index) => (
+                  <motion.button
+                    key={index}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    onClick={() => handleAnswer(index)}
+                    disabled={selectedAnswer !== null}
+                    className={`w-full p-4 sm:p-6 text-left border text-base sm:text-lg
+                             rounded-lg transition-colors
+                             ${selectedAnswer === null 
+                               ? 'border-gray-200 hover:border-black active:bg-gray-50' 
+                               : index === questions[currentQuestion].answer
+                                 ? 'border-green-500 bg-green-50'
+                                 : selectedAnswer === index
+                                   ? 'border-red-500 bg-red-50'
+                                   : 'border-gray-200'}`}
+                  >
+                    {option}
+                  </motion.button>
+                ))}
+              </div>
+
+              <AnimatePresence>
+                {selectedAnswer !== null && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="p-4 sm:p-6 bg-gray-50 rounded-lg">
+                      <p className="text-sm sm:text-base leading-relaxed">
+                        {questions[currentQuestion].explanation}
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {selectedAnswer !== null && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                transition={{ duration: 0.3 }}
-                className="overflow-hidden"
+              <motion.button
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                onClick={handleNext}
+                className="w-full py-4 px-6 bg-black text-white text-sm tracking-widest
+                         hover:bg-gray-900 mt-4"
               >
-                <div className="p-4 sm:p-6 bg-gray-50 rounded-lg">
-                  <p className="text-sm sm:text-base leading-relaxed">
-                    {questions[currentQuestion].explanation}
-                  </p>
-                </div>
-              </motion.div>
+                {currentQuestion === questions.length - 1 ? 'SHOW RESULTS' : 'NEXT QUESTION'}
+              </motion.button>
             )}
-          </div>
-
-          {selectedAnswer !== null && (
-            <motion.button
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={handleNext}
-              className="w-full py-4 px-6 bg-black text-white text-sm tracking-widest
-                       hover:bg-gray-900 transition-colors active:bg-gray-800
-                       touch-manipulation select-none mt-4"
-            >
-              {currentQuestion === questions.length - 1 ? 'SHOW RESULTS' : 'NEXT QUESTION'}
-            </motion.button>
-          )}
-        </motion.div>
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );
