@@ -280,9 +280,190 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        function QuizApp() {
-            // 既存のコード部分は変更なし
-            // ...
+       function QuizApp() {
+            const [currentQuestion, setCurrentQuestion] = React.useState(0);
+            const [selectedAnswer, setSelectedAnswer] = React.useState(null);
+            const [score, setScore] = React.useState(0);
+            const [showExplanation, setShowExplanation] = React.useState(false);
+            const [isCompleted, setIsCompleted] = React.useState(false);
+            const [answers, setAnswers] = React.useState([]);
+
+            const questions = [
+                {
+                    question: "中枢神経系の支持細胞として正しいのはどれか。",
+                    options: [
+                        "シュワン細胞",
+                        "オリゴデンドロサイト",
+                        "外套細胞",
+                        "線維芽細胞"
+                    ],
+                    answer: 1,
+                    explanation: "オリゴデンドロサイトは中枢神経系の支持細胞で、軸索に髄鞘を形成します。シュワン細胞は末梢神経系の支持細胞です。"
+                },
+                {
+                    question: "神経伝達物質として興奮性に働くものはどれか。",
+                    options: [
+                        "GABA",
+                        "グリシン",
+                        "グルタミン酸",
+                        "セロトニン"
+                    ],
+                    answer: 2,
+                    explanation: "グルタミン酸は興奮性の神経伝達物質で、中枢神経系で重要な役割を果たしています。GABAやグリシンは抑制性の神経伝達物質です。"
+                }
+            ];
+
+            const handleAnswer = (index) => {
+                if (selectedAnswer !== null) return;
+                setSelectedAnswer(index);
+                setShowExplanation(true);
+                const isCorrect = index === questions[currentQuestion].answer;
+                if (isCorrect) {
+                    setScore(score + 1);
+                }
+                setAnswers([...answers, { questionIndex: currentQuestion, selected: index, isCorrect }]);
+            };
+
+            const handleNext = () => {
+                if (currentQuestion < questions.length - 1) {
+                    setCurrentQuestion(currentQuestion + 1);
+                    setSelectedAnswer(null);
+                    setShowExplanation(false);
+                } else {
+                    setIsCompleted(true);
+                }
+            };
+
+            const handleRetry = () => {
+                setCurrentQuestion(0);
+                setSelectedAnswer(null);
+                setScore(0);
+                setShowExplanation(false);
+                setIsCompleted(false);
+                setAnswers([]);
+            };
+
+            const getButtonClass = (index) => {
+                if (selectedAnswer === null) return "option-button";
+                if (index === questions[currentQuestion].answer) return "option-button correct";
+                if (index === selectedAnswer) return "option-button incorrect";
+                return "option-button";
+            };
+
+            if (isCompleted) {
+                const percentage = Math.round((score / questions.length) * 100);
+                const passedThreshold = percentage >= 80;
+
+                return (
+                    <div className="container results">
+                        <h1>クイズ完了！</h1>
+                        <div className="score">{percentage}%</div>
+                        <div className="score-details">
+                            {score} / {questions.length} 問正解
+                        </div>
+                        
+                        {passedThreshold && (
+                            <div className="success-message">
+                                <h2>合格おめでとうございます！</h2>
+                                <p>素晴らしい成績です。次のステップに進みましょう。</p>
+                                <a 
+                                    href="https://forms.gle/YjUGNCwPWRVLP6mB9"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="success-link"
+                                >
+                                    次のステップへ進む →
+                                </a>
+                            </div>
+                        )}
+                        
+                        {questions.map((question, qIndex) => {
+                            const answer = answers[qIndex];
+                            return (
+                                <div key={qIndex} className="question-card">
+                                    <div className="question-text">
+                                        {qIndex + 1}. {question.question}
+                                    </div>
+                                    <div className="options">
+                                        {question.options.map((option, oIndex) => (
+                                            <div
+                                                key={oIndex}
+                                                className={`option-button ${
+                                                    oIndex === question.answer 
+                                                        ? 'correct'
+                                                        : answer.selected === oIndex && 'incorrect'
+                                                }`}
+                                            >
+                                                {option}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="explanation">
+                                        {question.explanation}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        
+                        <button className="retry-button" onClick={handleRetry}>
+                            もう一度挑戦する
+                        </button>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="container">
+                    <div className="progress-bar">
+                        <div 
+                            className="progress" 
+                            style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }}
+                        />
+                    </div>
+                    
+                    <div className="question-card">
+                        <div className="question-header">
+                            <div className="question-number">Question {currentQuestion + 1}</div>
+                            <div className="progress-count">{currentQuestion + 1} / {questions.length}</div>
+                        </div>
+                        
+                        <div className="question-text">
+                            {questions[currentQuestion].question}
+                        </div>
+                        
+                        <div className="options">
+                            {questions[currentQuestion].options.map((option, index) => (
+                                <button
+                                    key={index}
+                                    className={getButtonClass(index)}
+                                    onClick={() => handleAnswer(index)}
+                                    disabled={selectedAnswer !== null}
+                                >
+                                    {option}
+                                    {selectedAnswer !== null && index === questions[currentQuestion].answer && (
+                                        <span className="answer-icon">✓</span>
+                                    )}
+                                    {selectedAnswer === index && index !== questions[currentQuestion].answer && (
+                                        <span className="answer-icon">×</span>
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+
+                        {showExplanation && (
+                            <div className="explanation">
+                                {questions[currentQuestion].explanation}
+                            </div>
+                        )}
+
+                        {selectedAnswer !== null && (
+                            <button className="next-button" onClick={handleNext}>
+                                {currentQuestion === questions.length - 1 ? '結果を見る' : '次の問題へ'}
+                            </button>
+                        )}
+                    </div>
+                </div>
+            );
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
