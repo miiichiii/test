@@ -1,0 +1,325 @@
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Check, X, RotateCcw } from 'lucide-react';
+
+const QuizApp = () => {
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [selectedAnswer, setSelectedAnswer] = useState(null);
+  const [score, setScore] = useState(0);
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [answers, setAnswers] = useState([]);
+  const [isMobile, setIsMobile] = useState(false);
+  const [showCelebration, setShowCelebration] = useState(false);
+
+  const neonColors = [
+    '#ff00ff',
+    '#00ffff',
+    '#ff3377',
+    '#39ff14',
+    '#ff9933'
+  ];
+
+  const questions = [
+    {
+      question: "中枢神経系の支持細胞として正しいのはどれか。",
+      options: [
+        "シュワン細胞",
+        "オリゴデンドロサイト",
+        "外套細胞",
+        "線維芽細胞"
+      ],
+      answer: 1,
+      explanation: "オリゴデンドロサイトは中枢神経系の支持細胞で、軸索に髄鞘を形成します。シュワン細胞は末梢神経系の支持細胞です。"
+    },
+    {
+      question: "神経伝達物質として興奮性に働くものはどれか。",
+      options: [
+        "GABA",
+        "グリシン",
+        "グルタミン酸",
+        "セロトニン"
+      ],
+      answer: 2,
+      explanation: "グルタミン酸は興奮性の神経伝達物質で、中枢神経系で重要な役割を果たしています。GABAやグリシンは抑制性の神経伝達物質です。"
+    }
+  ];
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  const handleAnswer = (index) => {
+    if (selectedAnswer !== null) return;
+    setSelectedAnswer(index);
+    const isCorrect = index === questions[currentQuestion].answer;
+    if (isCorrect) {
+      setScore(prev => prev + 1);
+    }
+    setAnswers(prev => [...prev, {
+      questionIndex: currentQuestion,
+      selectedAnswer: index,
+      isCorrect
+    }]);
+  };
+
+  const handleNext = () => {
+    if (selectedAnswer === null) return;
+    if (currentQuestion < questions.length - 1) {
+      setCurrentQuestion(prev => prev + 1);
+      setSelectedAnswer(null);
+    } else {
+      setIsCompleted(true);
+      if (score + (selectedAnswer === questions[currentQuestion].answer ? 1 : 0) === questions.length) {
+        setShowCelebration(true);
+      }
+    }
+  };
+
+  const Particle = ({ angle, color }) => (
+    <motion.div
+      initial={{ x: 0, y: 0, scale: 1, opacity: 1 }}
+      animate={{ 
+        x: Math.cos(angle) * (100 + Math.random() * 200),
+        y: Math.sin(angle) * (100 + Math.random() * 200),
+        scale: 0,
+        opacity: 0
+      }}
+      transition={{ duration: 1 + Math.random(), ease: "easeOut" }}
+      className="absolute w-2 h-2 rounded-full"
+      style={{ 
+        backgroundColor: color,
+        boxShadow: `0 0 10px ${color}, 0 0 20px ${color}, 0 0 30px ${color}`,
+        filter: 'brightness(1.5)'
+      }}
+    />
+  );
+
+  const Celebration = () => {
+    useEffect(() => {
+      const timer = setTimeout(() => {
+        setShowCelebration(false);
+      }, 10000);
+      return () => clearTimeout(timer);
+    }, []);
+
+    return (
+      <motion.div 
+        initial={{ opacity: 1 }}
+        animate={{ opacity: 0 }}
+        transition={{ duration: 1, delay: 9 }}
+        className="fixed inset-0 pointer-events-none"
+      >
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+          {Array.from({ length: 50 }).map((_, i) => (
+            <Particle 
+              key={i}
+              angle={(Math.PI * 2 * i) / 50}
+              color={neonColors[i % neonColors.length]}
+            />
+          ))}
+        </div>
+      </motion.div>
+    );
+  };
+      if (isCompleted) {
+    const isPerfectScore = score === questions.length;
+
+    return (
+      <div className="min-h-screen w-full bg-white flex flex-col items-center py-8 px-4 sm:p-8 overflow-hidden">
+        {showCelebration && <Celebration />}
+        <div className="w-full max-w-2xl">
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center space-y-4 mb-8"
+          >
+            <h1 className={`text-3xl sm:text-4xl font-light tracking-tight ${
+              isPerfectScore ? 'animate-pulse' : ''
+            }`}>
+              {isPerfectScore ? "Perfect Score! 🎉" : "Quiz Complete"}
+            </h1>
+            <motion.div 
+              className="flex items-center justify-center space-x-2"
+              animate={isPerfectScore ? {
+                scale: [1, 1.1, 1],
+                transition: { repeat: Infinity, duration: 2 }
+              } : {}}
+            >
+              <span className={`text-5xl sm:text-6xl font-light ${
+                isPerfectScore ? 'text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600' : ''
+              }`}>
+                {Math.round((score / questions.length) * 100)}%
+              </span>
+              <span className="text-gray-500">
+                ({score}/{questions.length} correct)
+              </span>
+            </motion.div>
+          </motion.div>
+
+          <div className="space-y-6">
+            {questions.map((question, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+                className="border rounded-lg overflow-hidden"
+              >
+                <div className="p-6 bg-gray-50 border-b">
+                  <div className="flex justify-between items-center">
+                    <h2 className="text-lg font-medium">Question {index + 1}</h2>
+                    <div className="flex items-center">
+                      {answers[index]?.isCorrect ? (
+                        <span className="text-green-500 flex items-center">
+                          <Check className="w-4 h-4 mr-1" />
+                          Correct
+                        </span>
+                      ) : (
+                        <span className="text-red-500 flex items-center">
+                          <X className="w-4 h-4 mr-1" />
+                          Incorrect
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <p className="mt-4">{question.question}</p>
+                </div>
+                <div className="p-6">
+                  <div className="space-y-3">
+                    {question.options.map((option, optionIndex) => (
+                      <div
+                        key={optionIndex}
+                        className={`p-4 rounded-lg border ${
+                          optionIndex === question.answer
+                            ? 'border-green-500 bg-green-50'
+                            : optionIndex === answers[index]?.selectedAnswer && !answers[index]?.isCorrect
+                              ? 'border-red-500 bg-red-50'
+                              : 'border-gray-200'
+                        }`}
+                      >
+                        {option}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                    <p className="text-sm text-gray-700">{question.explanation}</p>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+
+          <motion.button
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+            onClick={() => window.location.reload()}
+            className="w-full mt-8 py-4 px-6 bg-black text-white text-sm tracking-widest
+                     hover:bg-gray-900 transition-colors flex items-center justify-center gap-2"
+          >
+            <RotateCcw className="w-4 h-4" />
+            RETRY QUIZ
+          </motion.button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen w-full bg-white flex flex-col items-center justify-center px-4 py-8 sm:p-8">
+      <div className="w-full max-w-2xl">
+        <div className="relative w-full h-1 bg-gray-100 mb-8 sm:mb-12">
+          <motion.div
+            initial={{ width: 0 }}
+            animate={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }}
+            transition={{ duration: 0.5 }}
+            className="absolute top-0 left-0 h-full bg-black"
+          />
+        </div>
+
+        <motion.div
+          key={currentQuestion}
+          initial={{ opacity: 0, x: isMobile ? 20 : 50 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5 }}
+          className="space-y-8"
+        >
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+            <h1 className="text-2xl sm:text-4xl font-light tracking-tight">
+              Question {currentQuestion + 1}
+            </h1>
+            <p className="text-sm text-gray-500">
+              {currentQuestion + 1} / {questions.length}
+            </p>
+          </div>
+
+          <div className="space-y-6">
+            <p className="text-lg sm:text-xl leading-relaxed">
+              {questions[currentQuestion].question}
+            </p>
+
+            <div className="space-y-3">
+              {questions[currentQuestion].options.map((option, index) => (
+                <motion.button
+                  key={index}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  onClick={() => handleAnswer(index)}
+                  disabled={selectedAnswer !== null}
+                  className={`w-full p-4 sm:p-6 text-left border text-base sm:text-lg
+                           transition-all touch-manipulation select-none rounded-lg
+                           ${selectedAnswer === null 
+                             ? 'border-gray-200 hover:border-black active:bg-gray-50' 
+                             : index === questions[currentQuestion].answer
+                               ? 'border-green-500 bg-green-50'
+                               : selectedAnswer === index
+                                 ? 'border-red-500 bg-red-50'
+                                 : 'border-gray-200'}`}
+                >
+                  {option}
+                </motion.button>
+              ))}
+            </div>
+
+            {selectedAnswer !== null && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                transition={{ duration: 0.3 }}
+                className="overflow-hidden"
+              >
+                <div className="p-4 sm:p-6 bg-gray-50 rounded-lg">
+                  <p className="text-sm sm:text-base leading-relaxed">
+                    {questions[currentQuestion].explanation}
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </div>
+
+          {selectedAnswer !== null && (
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={handleNext}
+              className="w-full py-4 px-6 bg-black text-white text-sm tracking-widest
+                       hover:bg-gray-900 transition-colors active:bg-gray-800
+                       touch-manipulation select-none mt-4"
+            >
+              {currentQuestion === questions.length - 1 ? 'SHOW RESULTS' : 'NEXT QUESTION'}
+            </motion.button>
+          )}
+        </motion.div>
+      </div>
+    </div>
+  );
+};
+
+export default QuizApp;
