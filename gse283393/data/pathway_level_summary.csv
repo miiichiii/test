@@ -1,0 +1,19 @@
+gene_set,contrast,n_genes,median_LFC,median_LFC_excl_mt,pct_sig_up,pct_sig_down
+Hallmark oxidative phosphorylation,MNGC vs macrophage,196,0.29,0.29,33.7,15.8
+Hallmark oxidative phosphorylation,MNGC vs stroma,196,-0.42,-0.42,2.0,20.4
+KEGG oxidative phosphorylation,MNGC vs macrophage,119,1.16,0.97,61.3,5.0
+KEGG oxidative phosphorylation,MNGC vs stroma,118,-0.31,-0.34,5.1,10.2
+GO antioxidant activity,MNGC vs macrophage,54,0.52,0.52,33.3,7.4
+GO antioxidant activity,MNGC vs stroma,54,-0.2,-0.2,9.3,5.6
+KEGG lysosome,MNGC vs macrophage,111,0.37,0.37,24.3,4.5
+KEGG lysosome,MNGC vs stroma,111,0.81,0.81,40.5,1.8
+GO phagocytosis,MNGC vs macrophage,204,-0.04,-0.04,18.6,14.2
+GO phagocytosis,MNGC vs stroma,203,0.83,0.83,30.0,2.5
+GO apoptotic cell clearance,MNGC vs macrophage,43,-0.15,-0.15,27.9,25.6
+GO apoptotic cell clearance,MNGC vs stroma,43,0.79,0.79,32.6,4.7
+GO proteolysis,MNGC vs macrophage,1339,-0.3,-0.3,12.1,18.6
+GO proteolysis,MNGC vs stroma,1328,-0.08,-0.08,8.3,6.8
+GO lipid metabolic process,MNGC vs macrophage,1027,-0.28,-0.28,11.5,16.6
+GO lipid metabolic process,MNGC vs stroma,1012,-0.08,-0.08,9.0,11.0
+GO T cell activation,MNGC vs macrophage,395,0.04,0.04,20.0,13.9
+GO T cell activation,MNGC vs stroma,392,0.8,0.8,28.3,5.1
