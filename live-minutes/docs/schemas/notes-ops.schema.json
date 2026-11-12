@@ -1,0 +1,53 @@
+{
+  "type": "object",
+  "description": "ライブ更新モデルが返す、ノートへの差分操作の一覧。",
+  "properties": {
+    "ops": {
+      "type": "array",
+      "description": "適用順に並べた差分操作。反映すべき新しい内容がなければ空配列。",
+      "items": {
+        "type": "object",
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": ["add_topic", "rename_topic", "add_item", "update_item", "remove_item"],
+            "description": "操作の種類。"
+          },
+          "topic_id": {
+            "type": ["string", "null"],
+            "description": "add_topic: この応答内だけで有効な仮ID（new-1, new-2 …）。rename_topic / add_item: 既存トピックのID、または同じ応答内の add_topic の仮ID。それ以外は null。"
+          },
+          "item_id": {
+            "type": ["string", "null"],
+            "description": "update_item / remove_item: 既存項目のID。それ以外は null（add_item のIDはアプリが採番する）。"
+          },
+          "title": {
+            "type": ["string", "null"],
+            "description": "add_topic / rename_topic: トピックの短いタイトル。それ以外は null。"
+          },
+          "kind": {
+            "type": ["string", "null"],
+            "enum": ["point", "decision", "action", "question", null],
+            "description": "add_item: 必須。update_item: 変更するときだけ指定し、変えないなら null。point=要点、decision=決定事項、action=ToDo、question=未解決の質問。"
+          },
+          "text": {
+            "type": ["string", "null"],
+            "description": "add_item: 必須。update_item: 変更するときだけ指定し、変えないなら null。1項目に1つの内容を簡潔に書く。"
+          },
+          "owner": {
+            "type": ["string", "null"],
+            "description": "action の担当者。発言で明示された場合だけ指定し、それ以外は null。"
+          },
+          "due": {
+            "type": ["string", "null"],
+            "description": "action の期限。発言で明示された場合だけ、発言どおりの表現で指定し、それ以外は null。"
+          }
+        },
+        "required": ["op", "topic_id", "item_id", "title", "kind", "text", "owner", "due"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["ops"],
+  "additionalProperties": false
+}
