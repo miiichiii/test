@@ -50,6 +50,7 @@ v1 でやらないこと:
 
 ```
 live-minutes/
+├── .gitignore
 ├── project.yml                  XcodeGen の定義（.xcodeproj は生成物でコミットしない）
 ├── App/                         アプリターゲット（薄いUI層）
 │   ├── LiveMinutesApp.swift
@@ -289,9 +290,23 @@ Viewは `SessionController` と各Storeを読むだけにする。依存（`Audi
 
 - Xcode 26 以降、Swift 6（厳格な並行性チェックを有効にする）
 - `Package.swift` と `project.yml` のデプロイメントターゲットは macOS 26
-- 署名はローカル実行用（Sign to Run Locally）
-- `Info.plist`: `NSMicrophoneUsageDescription`、`NSSpeechRecognitionUsageDescription`
+- 署名はローカル実行用（Sign to Run Locally）。`project.yml` では `CODE_SIGN_IDENTITY: "-"`、チームなしで表す
+- `Info.plist`: `NSMicrophoneUsageDescription`、`NSSpeechRecognitionUsageDescription`。手書きのファイル（`App/Info.plist`）を `INFOPLIST_FILE` で参照する。XcodeGen の `info:` / `entitlements:` キーは、生成のたびにファイルを書き出すので使わない
 - entitlements: `com.apple.security.app-sandbox`、`com.apple.security.device.audio-input`、`com.apple.security.network.client`
+- ウィンドウは1つだけ（`WindowGroup` ではなく `Window`）。会議は同時に1つしか扱わないため。単一の `Window` は、閉じるとアプリが終了する。録音中に閉じたときの扱いは Phase 2、メニューバー常駐との両立は Phase 6 で決める
+
+並行性の設定（Phase 0 で決めた。途中で変えると挙動が変わるので、アプリとパッケージで揃えて固定する）:
+
+| 項目 | アプリ（`project.yml`） | パッケージ（`Package.swift`） |
+|---|---|---|
+| 言語モード | `SWIFT_VERSION: "6.0"` | `swift-tools-version: 6.2`、`swiftLanguageModes: [.v6]` |
+| 既定のアクター分離 | `SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor`（Viewだけなので） | 指定しない（nonisolated）。Store と `SessionController` にだけ `@MainActor` を明示する |
+| `NonisolatedNonsendingByDefault` | 有効 | 有効 |
+| `InferIsolatedConformances` | 有効 | 有効 |
+
+- Swift 6 モードでは厳格な並行性チェックが常に complete になる。`SWIFT_STRICT_CONCURRENCY` は Swift 5 以下でだけ効く設定なので書かない
+- `NonisolatedNonsendingByDefault` が有効だと、nonisolated な async 関数は呼び出し元のアクター上で動く。メインスレッドから呼ばれうる重い処理は、actor に置くか `@concurrent` を付ける
+- `swift-tools-version` が 6.2 なのは、`.macOS(.v26)` が使える最小の版だから
 
 コマンドは [AGENTS.md](../AGENTS.md) を参照。
 

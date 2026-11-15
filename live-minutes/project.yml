@@ -1,0 +1,53 @@
+name: LiveMinutes
+
+options:
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  # App/Info.plist の CFBundleDevelopmentRegion と揃える。
+  developmentLanguage: ja
+
+packages:
+  LiveMinutesKit:
+    path: LiveMinutesKit
+
+settings:
+  base:
+    # XcodeGen の既定は 5.0。Swift 6 モードでは厳格な並行性チェックが常に complete になる
+    # （SWIFT_STRICT_CONCURRENCY は Swift 5 以下でだけ効く設定なので書かない）。
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  LiveMinutes:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    dependencies:
+      - package: LiveMinutesKit
+        product: LiveMinutesKit
+    settings:
+      base:
+        # 利用者が後で変える前提の仮の値。
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.LiveMinutes
+        INFOPLIST_FILE: App/Info.plist
+        CODE_SIGN_ENTITLEMENTS: App/LiveMinutes.entitlements
+        # Sign to Run Locally（チームなしのアドホック署名）。
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        # アプリターゲットは View だけなので、既定を MainActor にする。
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        # LiveMinutesKit/Package.swift と揃える。
+        SWIFT_UPCOMING_FEATURE_NONISOLATED_NONSENDING_BY_DEFAULT: "YES"
+        SWIFT_UPCOMING_FEATURE_INFER_ISOLATED_CONFORMANCES: "YES"
+
+schemes:
+  LiveMinutes:
+    build:
+      targets:
+        LiveMinutes: all
+    run:
+      config: Debug
