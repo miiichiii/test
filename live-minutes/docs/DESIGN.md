@@ -83,37 +83,59 @@ UI以外をすべて `LiveMinutesKit` に置くのは、`swift test` だけで�
 
 ### 4.1 Audio
 
-- `AudioSource`（protocol）: 音声バッファの非同期ストリームを提供する。`start()` / `stop()` を持つ
+- `AudioSource`（protocol、actor で実装）: 次の3つを持つ
+  - `start(outputFormat:) async throws -> AsyncStream<AudioChunk>`: 指定した形式（文字起こし側が求める形式）に変換した音声を流す。変換はソース側で行う
+  - `stop() async`: ストリームを終える。`stop()` の後にもう一度 `start` すると、新しいストリームを返す（Phase 2 の一時停止で使う）
+  - `levels: AsyncStream<Float>`: 入力レベル（0…1）。開始・停止をまたいで1本だけ存在し、読み手は画面用モデル1つだけ。文字起こしのイベントには混ぜない
+- `AudioChunk`: 変換済みの `AVAudioPCMBuffer` 1つ分。送った後は誰も書き換えないことを理由に `@unchecked Sendable`
 - `MicrophoneSource`: `AVAudioEngine` の `inputNode` にtapを付けて実装する
+- `StreamingAudioConverter`: `AVAudioConverter` をバッファをまたいで使い続ける変換。入力ブロックで `.endOfStream` を返さない（返すと以後何も出力しなくなる）。内部に数十ms分を溜めるので、出力は入力より少し遅れる
+- `FakeAudioSource`: 用意したバッファを流すテスト用の実装（Kit 本体に置き、以降のフェーズのテストでも使う）
+- `MicrophonePermission`（protocol）: マイクの許可。テストでは偽物に差し替える
 
 Phase 7 でシステム音声用の実装を足せるよう、文字起こし側は `AudioSource` だけに依存する。
 
 注意点:
 
-- tapのコールバックはリアルタイム音声スレッドで呼ばれる。そこでは変換とストリームへの受け渡しだけを行い、ロックや重い処理をしない
-- macOSには `AVAudioSession` がない。マイク権限は `AVCaptureDevice.requestAccess(for: .audio)` で求める
-- 録音中に入力デバイスが変わると（AirPodsの接続など）`AVAudioEngineConfigurationChange` 通知が来てエンジンが止まる。通知を受けてtapを付け直し、録音を続ける
-- 入力レベル（メーター表示用）はtapのバッファから計算する
+- tapのブロックは、リアルタイムの I/O スレッドではなく、メイン以外のスレッドで呼ばれる（`AVAudioNodeTapBlock` に `CA_REALTIME_API` は付いていない）。そこで行うのは「変換」「レベル計算」「`AsyncStream` への yield」の3つだけにする。自前のロック（`NSLock`、`Mutex`、`DispatchQueue.sync`）、actor への移動、await、ログ出力、ファイル入出力、変換器の生成はしない。yield は内部で短いロックを取るが、ストリームで受け渡す設計（§2）なので許容する
+- tapのブロックは `@Sendable` を明示した、actor に分離されないクロージャにする。分離されたクロージャをオーディオのスレッドから呼ぶと、Swift 6 の実行時の分離チェックで落ちる。tap 内で使う変換器などは、付け直すたびに新しく作るオブジェクト（`TapProcessor`）にまとめ、そのスレッドだけが触る
+- tap の `bufferSize` の対応範囲は 100〜400ms。遅延を抑えるため 100ms にする
+- macOSには `AVAudioSession` がない。マイク権限は `AVCaptureDevice.requestAccess(for: .audio)` で求める。未決定のままエンジンを始めると無音になるので、開始のたびに先に確かめる
+- 入力形式のサンプルレートかチャンネル数が0（入力デバイスがない）のまま `installTap` すると、Swift で捕まえられない例外になる。必ず確かめ、0なら `AudioSourceError.noInputDevice` にする
+- 録音中に入力デバイスが変わると（AirPodsの接続など）`AVAudioEngineConfigurationChange` 通知が来てエンジンが止まる。通知を受けたら少し待ち、`AVAudioEngine` ごと作り直して tap を付け直し、録音を続ける（停止後も古い入力形式が残ることがあるため、tap の付け直しだけにしない）。デバイスがまだない場合は、音声のストリームを開いたまま再試行を続ける。なお、ヘッダによると通知が来るのは入出力ハードウェアのチャンネル数かサンプルレートが変わったときで、同じ形式のデバイスへの切り替えで来るかは未確認
+- 通知は `addObserver`（`engine.start()` より前に付ける）で受けて `AsyncStream<Int>`（最新1件だけ溜める）に流し、actor 内の1本の Task で直列に処理する。流す値はエンジンの世代番号で、今のエンジンのものでない通知は捨てる（通知は続けて来るので、作り直した直後のエンジンを古い通知でもう一度壊さないため）。待っている間に停止された場合も何もしない。`NotificationCenter.notifications(named:)` は `Notification` が Sendable でないため使わない
+- `installTap(onBus:bufferSize:format:block:)` は macOS 27 で非推奨になり、エラーを返す版が追加された。デプロイメントターゲットが macOS 26 なので旧版を使う（警告は出ない）。ターゲットを 27 に上げるときに置き換える
+- 入力レベル（メーター表示用）はtapのバッファ（変換前）から計算する
 
 ### 4.2 Transcription
 
-- `TranscriptionEngine`（protocol）: `AudioSource` を受け取り、`TranscriptEvent` の非同期ストリームを返す
-- `AppleSpeechEngine`: `SpeechAnalyzer` + `SpeechTranscriber` による実装
+- `TranscriptionEngine`（protocol）: 次の3つを持つ
+  - `prepare(progress:)`: 手順1〜4（ロケールの確認、モデルの導入、入力形式の決定）。一度成功すれば以後は呼ばない
+  - `start(source:) async throws -> AsyncThrowingStream<TranscriptEvent, Error>`: `AudioSource` を開始し、イベントのストリームを返す。録音中に認識が失敗したら、ソースを止めてからストリームをエラーで終える（マイクを点けたままにしない）
+  - `stop()`: ソースを止め、最後の未確定分まで確定させてからストリームを終える
+- `AppleSpeechEngine`（actor）: `SpeechAnalyzer` + `SpeechTranscriber` による実装。対象ロケールは init で渡す（Phase 1 は `ja-JP` 固定。設定から選べるようにするのは後のフェーズ）
 - `TranscriptEvent`: `.volatile(text)`（未確定の途中結果）と `.final(TranscriptSegment)`（確定）
 - `TranscriptSegment`: `id`、`start`（秒）、`end`（秒）、`text`
+- `TranscriptionError`: 端末で使えない / ロケール非対応 / モデルのダウンロード失敗 / 入力形式なし / 準備前 / 二重開始 を区別する
 
-`AppleSpeechEngine` の手順（WWDC25 session 277 のサンプルコードで確認済みのAPI）:
+`SpeechAnalyzer` は一度 finish すると再利用できないため、`start` のたびに `SpeechTranscriber` と `SpeechAnalyzer` を作り直す。`prepare` で保持するのはロケールと入力形式だけ。actor は await で再入するので、状態（idle / starting / running / stopping）は最初の await より前に書き換え、二重の開始を防ぐ。
+
+`AppleSpeechEngine` の手順（WWDC25 session 277 のサンプルコードで確認済みのAPI。macOS 27.2 SDK でも一致を確認）:
 
 1. `SpeechTranscriber(locale:transcriptionOptions:reportingOptions:attributeOptions:)` を作る。`reportingOptions: [.volatileResults]`、`attributeOptions: [.audioTimeRange]`
-2. `SpeechTranscriber.supportedLocales` に対象ロケールがあるか確認する。なければエラーを表示して終了する
+2. `SpeechTranscriber.isAvailable` を確かめ、`SpeechTranscriber.supportedLocale(equivalentTo:)` で対象ロケールに対応する Locale を得る（`supportedLocales` に含まれるかを直接比べない）。得られなければエラーを表示して終了する。以降は得られた Locale で transcriber を作る
 3. `AssetInventory.assetInstallationRequest(supporting:)` が non-nil なら `downloadAndInstall()` でモデルを入れる。`progress` を画面に出す
-4. `SpeechAnalyzer(modules: [transcriber])` を作り、`SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith:)` で入力形式を得る
-5. `AsyncStream<AnalyzerInput>.makeStream()` を作り、`analyzer.start(inputSequence:)` を呼ぶ
-6. マイクのバッファを手順4の形式に変換し、`AnalyzerInput(buffer:)` にしてストリームへ流す
-7. `transcriber.results` を読む。`result.isFinal` が true なら確定、false なら未確定。未確定の結果は、直前の未確定結果を置き換える。確定が来たら未確定表示を消す
-8. 停止時は `analyzer.finalizeAndFinishThroughEndOfInput()` を呼ぶ。呼ばないと最後の未確定分が確定されずに失われる
+4. `SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])`（static）で入力形式を得る。`SpeechAnalyzer(modules: [transcriber])` は `start` のたびに作る（手順5）
+5. `AsyncStream<AnalyzerInput>.makeStream()` を作り、`analyzer.prepareToAnalyze(in:)` でモデルを先に読み込んでから `analyzer.start(inputSequence:)` を呼ぶ。続けて `transcriber.results` を読む Task を起こし、最後に `AudioSource.start(outputFormat:)` を呼ぶ（モデルの読み込み中にマイクの音声が溜まらないようにするため）
+6. マイクのバッファを手順4の形式に変換し、`AnalyzerInput(buffer:)` にしてストリームへ流す。変換はソース側（§4.1）で行う。入力のストリームを閉じるのは、ソースのストリームが終わったときの1か所だけにする
+7. `transcriber.results` を読む。`result.isFinal` が true なら確定、false なら未確定。本文は `String(result.text.characters)`、時刻は `result.range` から取る。空白だけの確定は捨てる。未確定の結果は、直前の未確定結果を置き換える。確定が来たら未確定表示を消す（`TranscriptBuffer.apply(_:)`）
+8. 停止時は、ソースを止めて入力のストリームが閉じるのを待ち、`analyzer.finalizeAndFinishThroughEndOfInput()` を呼ぶ。呼ばないと最後の未確定分が確定されずに失われる。その後、結果の読み取りが終わるのを待つ。最終確定と結果の読み取りの両方に10秒の上限を設け、超えたら `cancelAndFinishNow()` で打ち切る（「確定中」のまま固まらないようにするため）
 
-タイムスタンプは「投入した音声の累積時間」が基準になる。一時停止中は音声を流さないので、壁時計の時刻とはずれる。表示用の時刻は会議開始からの録音経過時間として扱う。
+結果のストリームは、停止操作によらずに終わった場合（エラーの有無とも）も必ずエンジンに知らせ、ソースを止めてからイベントのストリームをエラーで終える。開始処理の途中で終わった場合は、開始そのものを失敗にする。
+
+タイムスタンプは「投入した音声の累積時間」が基準になる（`AnalyzerInput` に `bufferStartTime` は渡さない）。一時停止中や入力デバイスの切り替え中は音声を流さないので、壁時計の時刻とはずれる。表示用の時刻は会議開始からの録音経過時間として扱う。
+
+Phase 1 では、画面用の単純なモデル `LiveTranscriptionModel`（`@MainActor`、`@Observable`）が、開始・停止、権限の確認、確定セグメントと未確定テキスト（`TranscriptBuffer`）、入力レベルを持つ。Phase 2 で `SessionController` と `TranscriptStore` に置き換える。
 
 ### 4.3 Transcript
 
@@ -271,7 +293,7 @@ Viewは `SessionController` と各Storeを読むだけにする。依存（`Audi
 
 メインウィンドウは2ペイン。
 
-- 左: 文字起こし。確定テキストは通常の色、未確定テキストは薄い色。新しい行が来たら自動で最下部へスクロールする。ユーザーが上にスクロールしている間は自動スクロールを止め、「最新へ」ボタンを出す
+- 左: 文字起こし。確定テキストは通常の色、未確定テキストは薄い色。新しい行が来たら自動で最下部へスクロールする。ユーザーが上にスクロールしている間は自動スクロールを止め、「最新へ」ボタンを出す（Phase 1 は最下部への自動スクロールだけ。止める動作と「最新へ」ボタンは Phase 2）
 - 右: ノート。トピックごとに項目を並べ、種類（要点 / 決定 / ToDo / 質問）をバッジで示す。ToDoには担当と期限を添える。追加・更新された項目は数秒間ハイライトする
 - ツールバー: 録音開始 / 一時停止 / 停止、経過時間、入力レベル、LLMの状態（更新中 / 待機 / エラー）、「要約の送信を一時停止」トグル、設定
 - 終了後: 議事録の表示、Markdownのコピーと保存
@@ -316,8 +338,8 @@ Viewは `SessionController` と各Storeを読むだけにする。依存（`Audi
 
 | # | 項目 | 確認するフェーズ | 確認結果 |
 |---|---|---|---|
-| 1 | 実機の `SpeechTranscriber.supportedLocales` に `ja-JP` が含まれるか | Phase 1 | 未確認 |
-| 2 | `SpeechAnalyzer` の利用に音声認識の権限（`NSSpeechRecognitionUsageDescription`）が必要か。不要でも Info.plist に入れておいて害はない | Phase 1 | 未確認 |
+| 1 | 実機の `SpeechTranscriber.supportedLocales` に `ja-JP` が含まれるか | Phase 1 | 含まれる（2026-11-15、macOS 27.2 / Xcode 27.2 の実機で確認）。対応ロケールは45件で、`supportedLocale(equivalentTo: ja-JP)` も `ja-JP` を返す。この機種では `installedLocales` にも `ja-JP` があり、`assetInstallationRequest(supporting:)` は nil（ダウンロード不要）だった。ただし、その呼び出し前の `AssetInventory.status(forModules:)` は `.supported` で、呼び出し後に `.installed` に変わった。状態の判定に `status` を使わず、§4.2 の手順3どおり `assetInstallationRequest` の結果で判断する |
+| 2 | `SpeechAnalyzer` の利用に音声認識の権限（`NSSpeechRecognitionUsageDescription`）が必要か。不要でも Info.plist に入れておいて害はない | Phase 1 | 不要と判断（2026-11-15）。Info.plist も権限要求もない、サンドボックスなしのコマンドラインツールで、日本語の音声ファイルを `SpeechAnalyzer` + `SpeechTranscriber` で最後まで文字起こしでき、許可のダイアログも出なかった。サンドボックス下のアプリでも出ないかは、Phase 1 の人による確認で見る。キーは Info.plist に残す |
 | 3 | OpenAI の Sol / Luna の正確なモデルID。設計時は公式サイトに接続できず、第三者の記事では `gpt-6.1-sol` / `gpt-6-luna` と `gpt-5.6-sol` / `gpt-5.6-luna` が混在していた | Phase 3 | 未確認 |
 | 4 | Responses API の構造化出力のリクエスト形（§4.7）、応答から出力テキストと拒否を読み取る方法、`store` パラメータ、ストリーミングのイベント名 | Phase 3 | 未確認 |
 | 5 | [notes-ops.schema.json](schemas/notes-ops.schema.json) がそのまま strict モードで受理されるか（null を含む `enum` の書き方など） | Phase 3 | 未確認 |
