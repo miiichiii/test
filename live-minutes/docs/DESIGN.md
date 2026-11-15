@@ -128,18 +128,18 @@ Phase 7 でシステム音声用の実装を足せるよう、文字起こし側
 4. `SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])`（static）で入力形式を得る。`SpeechAnalyzer(modules: [transcriber])` は `start` のたびに作る（手順5）
 5. `AsyncStream<AnalyzerInput>.makeStream()` を作り、`analyzer.prepareToAnalyze(in:)` でモデルを先に読み込んでから `analyzer.start(inputSequence:)` を呼ぶ。続けて `transcriber.results` を読む Task を起こし、最後に `AudioSource.start(outputFormat:)` を呼ぶ（モデルの読み込み中にマイクの音声が溜まらないようにするため）
 6. マイクのバッファを手順4の形式に変換し、`AnalyzerInput(buffer:)` にしてストリームへ流す。変換はソース側（§4.1）で行う。入力のストリームを閉じるのは、ソースのストリームが終わったときの1か所だけにする
-7. `transcriber.results` を読む。`result.isFinal` が true なら確定、false なら未確定。本文は `String(result.text.characters)`、時刻は `result.range` から取る。空白だけの確定は捨てる。未確定の結果は、直前の未確定結果を置き換える。確定が来たら未確定表示を消す（`TranscriptBuffer.apply(_:)`）
+7. `transcriber.results` を読む。`result.isFinal` が true なら確定、false なら未確定。本文は `String(result.text.characters)`、時刻は `result.range` から取る。空白だけの確定は捨てる。未確定の結果は、直前の未確定結果を置き換える。確定が来たら未確定表示を消す（`TranscriptStore.apply(_:)`）
 8. 停止時は、ソースを止めて入力のストリームが閉じるのを待ち、`analyzer.finalizeAndFinishThroughEndOfInput()` を呼ぶ。呼ばないと最後の未確定分が確定されずに失われる。その後、結果の読み取りが終わるのを待つ。最終確定と結果の読み取りの両方に10秒の上限を設け、超えたら `cancelAndFinishNow()` で打ち切る（「確定中」のまま固まらないようにするため）
 
 結果のストリームは、停止操作によらずに終わった場合（エラーの有無とも）も必ずエンジンに知らせ、ソースを止めてからイベントのストリームをエラーで終える。開始処理の途中で終わった場合は、開始そのものを失敗にする。
 
-タイムスタンプは「投入した音声の累積時間」が基準になる（`AnalyzerInput` に `bufferStartTime` は渡さない）。一時停止中や入力デバイスの切り替え中は音声を流さないので、壁時計の時刻とはずれる。表示用の時刻は会議開始からの録音経過時間として扱う。
-
-Phase 1 では、画面用の単純なモデル `LiveTranscriptionModel`（`@MainActor`、`@Observable`）が、開始・停止、権限の確認、確定セグメントと未確定テキスト（`TranscriptBuffer`）、入力レベルを持つ。Phase 2 で `SessionController` と `TranscriptStore` に置き換える。
+タイムスタンプは「投入した音声の累積時間」が基準になる（`AnalyzerInput` に `bufferStartTime` は渡さない）。`start` のたびに `SpeechAnalyzer` を作り直すので、時刻は `start` ごとに0から始まる。入力デバイスの切り替え中は音声を流さないので、壁時計の時刻とはわずかにずれる。表示用の時刻は会議開始からの録音経過時間として扱い、一時停止をまたぐ分のずらしは `SessionController` が行う（§4.10）。
 
 ### 4.3 Transcript
 
-- `TranscriptStore`（`@MainActor`、`@Observable`）: 確定セグメントの配列と、現在の未確定テキストを持つ
+- `TranscriptStore`（`@MainActor`、`@Observable`）: 確定セグメントの配列と、現在の未確定テキストを持つ。`apply(_:)` で未確定は置き換え、確定は追加して未確定を消す。未確定テキストは頻繁に変わるので、確定セグメントとは別のプロパティにし、未確定の更新で一覧全体を再描画させない。時刻は録音経過時間に直したものを入れる
+- `TranscriptExporter`: 書き出し用の整形（テキスト / Markdown）。各行に開始時刻（`HH:MM:SS`）を付け、確定セグメントだけを使う（画面の確定部分と一致させるため）
+- `ElapsedTimeFormat`: 録音経過時間の表示（`HH:MM:SS`）
 
 確定セグメントは届くたびに `transcript.jsonl` へ1行追記する。アプリが異常終了しても、そこまでの文字起こしが残るようにするため。
 
@@ -270,9 +270,16 @@ APIキーは `UserDefaults` やファイルには書かない。モデルIDは�
 
 ### 4.9 Persistence
 
-- `SessionRepository`: セッションの作成・一覧・読み込み・削除
+- `SessionRepository`（actor）: セッションの作成・一覧・読み込み・削除。Phase 2 で作るのは作成、`meta.json` の読み書き、`transcript.jsonl` の追記と読み込み。一覧・削除は Phase 5 で足す。保存先のフォルダは init で渡す（テストでは一時フォルダを渡し、実際の保存先に書かない）
+- `SessionMeta`: `id`、`title`（会議名）、`startedAt`（録音を始めた日時）、`duration`（一時停止を除く録音時間。終了時に書く）、`status`（`recording` / `finished`）。`status` が `recording` のまま残っていれば異常終了したセッションで、Phase 5 でそう扱う
 
-保存先は `~/Library/Application Support/LiveMinutes/sessions/<セッションID>/`。
+保存先は `Application Support/LiveMinutes/sessions/<セッションID>/`。アプリは App Sandbox で動くので、実際の場所は `~/Library/Containers/<バンドルID>/Data/Library/Application Support/LiveMinutes/sessions/` になる（バンドルIDは今は仮の `com.example.LiveMinutes`。変えると保存先も変わる）。セッションIDは UUID。
+
+- フォルダは文字起こしの開始に成功してから作る（失敗した開始で空のフォルダを残さない）。作成時に空の `transcript.jsonl` も作る
+- `transcript.jsonl` は1行に `TranscriptSegment` の JSON を1件ずつ書く。セッション中はファイルを開いたままにし、行と改行を1回の書き込みで追記する。fsync はしない（書き込んだデータはカーネルに渡っているので、アプリが強制終了しても残る。失われるのは電源断などの場合だけ）
+- 読み込みは、ファイルをバイト列のまま改行で分け、行ごとにデコードする。デコードできない行（異常終了で途中まで書かれた最後の行など）は飛ばす。ファイル全体を文字列にすると、最後の行がマルチバイト文字の途中で切れていたときに全体の変換に失敗するため
+- 末尾が改行で終わっていないファイルに追記するときは、先に改行を足す
+- `meta.json` はアトミックに書き換える。日時は ISO 8601
 
 | ファイル | 内容 | 書き込みタイミング |
 |---|---|---|
@@ -287,13 +294,29 @@ APIキーは `UserDefaults` やファイルには書かない。モデルIDは�
 
 - `SessionController`（`@MainActor`、`@Observable`）: 1回の会議の進行を束ねる。状態は `idle` → `preparing`（権限確認・モデル準備）→ `recording` ⇄ `paused` → `finishing`（最終確定・残りの送信・議事録生成）→ `finished`
 
-Viewは `SessionController` と各Storeを読むだけにする。依存（`AudioSource`、`TranscriptionEngine`、`LLMClient`、時計）は外から渡せるようにし、テストでは偽物に差し替える。
+Viewは `SessionController` と各Storeを読むだけにする。依存（`AudioSource`、`TranscriptionEngine`、`MicrophonePermission`、`SessionRepository`、時計、Phase 3 以降は `LLMClient`）は外から渡せるようにし、テストでは偽物に差し替える。
+
+Phase 2 で決めたこと:
+
+- **許されない操作は無視する**。開始は `idle` と `finished` のときだけ（`finished` から開始すると新しいセッション）、一時停止は `recording`、再開は `paused`、停止は `recording` と `paused` のときだけ受け付ける
+- **操作は1つずつ**。開始・一時停止・再開・停止は処理中（`activity`）を持ち、その間はほかの操作を無視する。公開する状態は上の6つのままにし、「一時停止の確定中」「再開中」は `activity` で表す
+- **一時停止は `TranscriptionEngine.stop()`、再開は `start(source:)`**。一時停止の時点で未確定分まで確定でき、マイクも止まる。`SpeechAnalyzer` を生かしたままソースだけ止める案は、入力のない analyzer を長く生かしたときの挙動が未確認なので採らない。再開時に analyzer を作り直す時間がかかる
+- **再開後の時刻のずらし**: エンジンの時刻は再開のたびに0から始まるので、再開後のセグメントには `max(一時停止時点の録音経過時間, 直前の区間の最後の確定の end)` を足してから表示・保存する。録音経過時間を基準にするのは表示中の経過時間と揃えるため、下限を付けるのは停止を押してからマイクが止まるまでの分だけ確定の end が経過時間を超えることがあるため。ずらし幅はイベントを読む Task を作るときに決めて渡す
+- **録音経過時間**は録音区間の合計で、一時停止中は進まない。時計はスリープ中に進まないもの（`SuspendingClock`）を使う（スリープ中はマイクも止まるため）
+- イベントを読む Task の中で、`TranscriptStore` への反映と `transcript.jsonl` への追記を1件ずつ順に行う（保存の順序を保つため、別の Task に投げない）
+- 追記に失敗しても文字起こしは続け、警告を1回だけ表示する。セッションのフォルダを作れない場合は、開始そのものを失敗にする
+- **セッションの終了処理は1か所**（停止操作・認識の失敗・アプリの終了のどれからも通る）。最初の await より前に「現在のセッション」を消して二重に走らないようにし、イベントの Task はキャンセルせずストリームの終わりを待つ。終了時に `meta.json` に `duration` と `finished` を書く
+- 録音中に認識が失敗したら、そこまでを保存して `finished` に移り、問題を表示する（書き出しはできる）。再開に失敗したら `paused` のまま問題を表示する。認識の失敗と一時停止の操作が重なり、一時停止が先に通った場合も同じく `paused` のまま問題を表示する（再開か停止を選べる）。停止して保存できたら、こうした案内は消す。`finished` から開始に失敗したら、`finished` と前回の文字起こしを残す
+- **アプリの終了**（Cmd+Q、ウィンドウを閉じる、Dock から終了）: `NSApplicationDelegate.applicationShouldTerminate` で、処理中の操作か録音中・一時停止中のセッションがあれば `.terminateLater` を返し、処理中の操作を待ってから停止して保存を終え、終了する。最終確定は最大10秒かかるので、12秒で打ち切って終了する（その場合 `meta.json` は `recording` のまま残る。再開の処理中に終了すると、再開の完了を待ってから最終確定に入るので、12秒を超えることがある。確定済みの分は `transcript.jsonl` に残っている）。確認ダイアログは出さない
 
 ## 5. 画面
 
 メインウィンドウは2ペイン。
 
-- 左: 文字起こし。確定テキストは通常の色、未確定テキストは薄い色。新しい行が来たら自動で最下部へスクロールする。ユーザーが上にスクロールしている間は自動スクロールを止め、「最新へ」ボタンを出す（Phase 1 は最下部への自動スクロールだけ。止める動作と「最新へ」ボタンは Phase 2）
+- 左: 文字起こし。確定テキストは通常の色、未確定テキストは薄い色。各行に開始時刻（録音経過時間）を付ける。新しい行が来たら自動で最下部へスクロールする。ユーザーが上にスクロールしている間は自動スクロールを止め、「最新へ」ボタンを出す
+  - 実装: `ScrollPosition` と `onScrollGeometryChange` で、スクロール位置と最下部までの距離を追う。最下部から60pt以内なら追従し、上にスクロールして（位置が減って）最下部から離れたときだけ追従をやめる。行が増えただけ（位置が変わらない）では止めない。追従のスクロールにはアニメーションを付けない（途中の位置で誤判定するため）
+  - ヘッダに会議名と書き出しメニュー（コピー、テキストとして保存、Markdown として保存）
+- 開始時: 会議名を入力するシート。空なら開始日時から「2026-11-15 14:30 の会議」のように付ける
 - 右: ノート。トピックごとに項目を並べ、種類（要点 / 決定 / ToDo / 質問）をバッジで示す。ToDoには担当と期限を添える。追加・更新された項目は数秒間ハイライトする
 - ツールバー: 録音開始 / 一時停止 / 停止、経過時間、入力レベル、LLMの状態（更新中 / 待機 / エラー）、「要約の送信を一時停止」トグル、設定
 - 終了後: 議事録の表示、Markdownのコピーと保存
@@ -314,8 +337,8 @@ Viewは `SessionController` と各Storeを読むだけにする。依存（`Audi
 - `Package.swift` と `project.yml` のデプロイメントターゲットは macOS 26
 - 署名はローカル実行用（Sign to Run Locally）。`project.yml` では `CODE_SIGN_IDENTITY: "-"`、チームなしで表す
 - `Info.plist`: `NSMicrophoneUsageDescription`、`NSSpeechRecognitionUsageDescription`。手書きのファイル（`App/Info.plist`）を `INFOPLIST_FILE` で参照する。XcodeGen の `info:` / `entitlements:` キーは、生成のたびにファイルを書き出すので使わない
-- entitlements: `com.apple.security.app-sandbox`、`com.apple.security.device.audio-input`、`com.apple.security.network.client`
-- ウィンドウは1つだけ（`WindowGroup` ではなく `Window`）。会議は同時に1つしか扱わないため。単一の `Window` は、閉じるとアプリが終了する。録音中に閉じたときの扱いは Phase 2、メニューバー常駐との両立は Phase 6 で決める
+- entitlements: `com.apple.security.app-sandbox`、`com.apple.security.device.audio-input`、`com.apple.security.network.client`、`com.apple.security.files.user-selected.read-write`（Phase 2 の書き出しで、利用者が選んだ場所に保存するため）
+- ウィンドウは1つだけ（`WindowGroup` ではなく `Window`）。会議は同時に1つしか扱わないため。単一の `Window` は、閉じるとアプリが終了する。録音中に閉じた（終了した）ときは、停止して保存を終えてから終了する（§4.10）。メニューバー常駐との両立は Phase 6 で決める
 
 並行性の設定（Phase 0 で決めた。途中で変えると挙動が変わるので、アプリとパッケージで揃えて固定する）:
 
