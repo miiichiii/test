@@ -3,7 +3,7 @@ import os
 
 /// セッションの保存（DESIGN.md §4.9）。
 ///
-/// `<rootDirectory>/<セッションID>/` に `meta.json` と `transcript.jsonl` を置く。
+/// `<rootDirectory>/<セッションID>/` に `meta.json`、`transcript.jsonl`、`notes.json` を置く。
 /// 一覧・削除は Phase 5 で足す。
 public actor SessionRepository {
     public enum RepositoryError: Error, Equatable, Sendable {
@@ -18,6 +18,7 @@ public actor SessionRepository {
     private static let logger = Logger(subsystem: LiveMinutesInfo.logSubsystem, category: "Persistence")
     static let metaFileName = "meta.json"
     static let transcriptFileName = "transcript.jsonl"
+    static let notesFileName = "notes.json"
 
     /// 既定の保存先。サンドボックス下では
     /// `~/Library/Containers/<バンドルID>/Data/Library/Application Support/LiveMinutes/sessions/` になる。
@@ -63,6 +64,21 @@ public actor SessionRepository {
     public func loadMeta(id: UUID) throws -> SessionMeta {
         let url = directory(for: id).appending(path: Self.metaFileName)
         return try Self.metaDecoder.decode(SessionMeta.self, from: Data(contentsOf: url))
+    }
+
+    // MARK: - notes.json
+
+    /// ノートをアトミックに書き換える（ops を適用するたび）。
+    public func writeNotes(_ notes: Notes, to id: UUID) throws {
+        let url = directory(for: id).appending(path: Self.notesFileName)
+        try Self.metaEncoder.encode(notes).write(to: url, options: .atomic)
+    }
+
+    /// ノートを読む。まだない場合は空のノート。
+    public func loadNotes(id: UUID) throws -> Notes {
+        let url = directory(for: id).appending(path: Self.notesFileName)
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return Notes() }
+        return try JSONDecoder().decode(Notes.self, from: Data(contentsOf: url))
     }
 
     // MARK: - transcript.jsonl

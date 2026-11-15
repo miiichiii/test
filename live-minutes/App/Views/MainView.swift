@@ -10,7 +10,7 @@ struct MainView: View {
         HSplitView {
             TranscriptPane(controller: controller)
                 .paneFrame()
-            PaneView(title: "ノート")
+            NotesPane(controller: controller)
                 .paneFrame()
         }
         .frame(minHeight: 320)
@@ -33,18 +33,6 @@ struct MainView: View {
             } onCancel: {
                 isStartSheetPresented = false
             }
-        }
-    }
-}
-
-/// 見出しと空の領域だけを持つペイン。中身は後のフェーズで入れる。
-private struct PaneView: View {
-    let title: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PaneHeader(title: title)
-            Color.clear
         }
     }
 }

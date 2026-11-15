@@ -9,6 +9,18 @@ struct RecordingToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            NotesStatusLabel(status: controller.notes.status)
+            Toggle(isOn: Binding(
+                get: { controller.notes.isSendingPaused },
+                set: { controller.setNotesSendingPaused($0) }
+            )) {
+                Label("要約の送信を一時停止", systemImage: controller.notes.isSendingPaused ? "eye.slash.fill" : "eye.slash")
+            }
+            .toggleStyle(.button)
+            // 会議中だけ切り替えられる（新しい会議ではオフから始まるので、開始前に押しても効かないため）。
+            .disabled(!(controller.state == .recording || controller.state == .paused))
+            .help("オンの間に話した内容は、ノートの整理に使わず OpenAI にも送りません（文字起こしには残ります）。オンにした時点でまだ送っていない発言も送りません")
+
             StatusLabel(state: controller.state, activity: controller.activity)
             ElapsedTimeLabel(controller: controller)
             LevelMeter(controller: controller)
@@ -117,5 +129,35 @@ private struct LevelMeter: View {
             .accessibilityElement()
             .accessibilityLabel("入力レベル")
             .accessibilityValue("\(Int(level * 100))%")
+    }
+}
+
+/// ノートのライブ更新の状態（更新中 / 待機 / エラー）。
+private struct NotesStatusLabel: View {
+    let status: LiveNotesStatus
+
+    var body: some View {
+        switch status {
+        case .inactive, .notConfigured:
+            EmptyView()
+        case .waiting:
+            Label("ノート: 待機", systemImage: "checkmark.circle")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.secondary)
+        case .updating:
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.small)
+                Text("ノート: 更新中").foregroundStyle(.secondary)
+            }
+        case .paused:
+            Label("ノート: 送信停止中", systemImage: "pause.circle")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.secondary)
+        case .failed:
+            Label("ノート: エラー", systemImage: "exclamationmark.triangle.fill")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.orange)
+                .help("右のノートペインに理由を表示しています")
+        }
     }
 }

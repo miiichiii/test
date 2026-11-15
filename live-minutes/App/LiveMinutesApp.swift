@@ -20,7 +20,10 @@ struct LiveMinutesApp: App {
                 settings: appDelegate.settings,
                 secretStore: appDelegate.secretStore,
                 connectionTest: appDelegate.connectionTest,
-                loadLocales: { await AppleSpeechEngine.supportedLocaleIdentifiers() }
+                loadLocales: { await AppleSpeechEngine.supportedLocaleIdentifiers() },
+                onAPIKeyChange: { [controller = appDelegate.controller] in
+                    Task { await controller.apiKeyDidChange() }
+                }
             )
         }
     }
@@ -40,9 +43,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     override init() {
         let settings = AppSettings()
-        let secretStore = KeychainStore()
-        // API キーはリクエストのたびにキーチェーンから読む（起動時には読まない）。
-        let llmClient = OpenAIResponsesClient(apiKey: { try await secretStore.readAPIKey() })
+        // API キーは起動時には読まず、最初に必要になったときにキーチェーンから読んでメモリに持つ。
+        let secretStore = CachingSecretStore(base: KeychainStore())
+        let llmClient = OpenAIResponsesClient(
+            apiKey: { try await secretStore.readAPIKey() },
+            onAuthenticationFailure: { await secretStore.invalidate() }
+        )
+        let repository = SessionRepository(rootDirectory: SessionRepository.defaultRootDirectory)
+        let notesFactory = LiveNotesFactory(
+            settings: settings,
+            secretStore: secretStore,
+            client: llmClient,
+            repository: repository
+        )
         self.settings = settings
         self.secretStore = secretStore
         self.connectionTest = ConnectionTest(client: llmClient)
@@ -50,9 +63,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             engine: AppleSpeechEngine(),
             source: MicrophoneSource(),
             permission: SystemMicrophonePermission(),
-            repository: SessionRepository(rootDirectory: SessionRepository.defaultRootDirectory),
+            repository: repository,
             clock: SystemSessionClock(),
-            recognitionLocale: { settings.recognitionLocale }
+            recognitionLocale: { settings.recognitionLocale },
+            notesEngineFactory: { meta, store in await notesFactory.makeEngine(for: meta, store: store) }
         )
         super.init()
     }

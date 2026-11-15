@@ -8,6 +8,8 @@ struct SettingsView: View {
     let connectionTest: ConnectionTest
     /// 認識言語の候補（BCP 47 の識別子）を読む
     let loadLocales: () async -> [String]
+    /// API キーを保存・削除したとき（会議中なら、その時点からノートの更新を始める・再開する）
+    let onAPIKeyChange: () -> Void
 
     @State private var apiKeyInput = ""
     /// 保存済みか。確かめるまでは nil
@@ -106,6 +108,7 @@ struct SettingsView: View {
             hasAPIKey = true
             keyMessage = KeyMessage(text: "保存しました", isError: false)
             connectionTest.reset()
+            onAPIKeyChange()
         } catch {
             keyMessage = KeyMessage(text: error.localizedDescription, isError: true)
         }
@@ -120,6 +123,7 @@ struct SettingsView: View {
             hasAPIKey = false
             keyMessage = KeyMessage(text: "削除しました", isError: false)
             connectionTest.reset()
+            onAPIKeyChange()
         } catch {
             keyMessage = KeyMessage(text: error.localizedDescription, isError: true)
         }

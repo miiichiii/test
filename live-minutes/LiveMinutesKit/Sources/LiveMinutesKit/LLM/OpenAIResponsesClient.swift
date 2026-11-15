@@ -22,6 +22,7 @@ public struct OpenAIResponsesClient: LLMClient {
     private let endpoint: URL
     private let apiKey: APIKeyProvider
     private let sleep: Sleep
+    private let onAuthenticationFailure: (@Sendable () async -> Void)?
 
     private static let logger = Logger(subsystem: LiveMinutesInfo.logSubsystem, category: "LLM")
 
@@ -46,16 +47,19 @@ public struct OpenAIResponsesClient: LLMClient {
     ///   - session: テストでは URLProtocol のスタブを入れたセッションを渡す
     ///   - apiKey: API キーを返す。ない場合は `LLMError.missingAPIKey` などを投げる
     ///   - sleep: 再試行の待ち。テストでは待たない関数を渡す
+    ///   - onAuthenticationFailure: 401 を受けたときに呼ぶ（持っているキーを捨てるため）
     public init(
         session: URLSession = OpenAIResponsesClient.makeSession(),
         endpoint: URL = OpenAIResponsesClient.defaultEndpoint,
         apiKey: @escaping APIKeyProvider,
-        sleep: @escaping Sleep = { try await Task.sleep(for: $0) }
+        sleep: @escaping Sleep = { try await Task.sleep(for: $0) },
+        onAuthenticationFailure: (@Sendable () async -> Void)? = nil
     ) {
         self.session = session
         self.endpoint = endpoint
         self.apiKey = apiKey
         self.sleep = sleep
+        self.onAuthenticationFailure = onAuthenticationFailure
     }
 
     // MARK: - 構造化出力
@@ -89,6 +93,7 @@ public struct OpenAIResponsesClient: LLMClient {
                     return data
                 }
                 let error = Self.error(status: http.statusCode, body: data)
+                if error == .authentication { await onAuthenticationFailure?() }
                 guard attempt < Self.maxRetries, let wait = Self.retryDelay(for: error, attempt: attempt, http: http) else {
                     throw error
                 }
@@ -149,6 +154,7 @@ public struct OpenAIResponsesClient: LLMClient {
                         if body.count >= Self.maxErrorBodyBytes { break }
                     }
                     let error = Self.error(status: http.statusCode, body: body)
+                    if error == .authentication { await onAuthenticationFailure?() }
                     guard attempt < Self.maxRetries, let wait = Self.retryDelay(for: error, attempt: attempt, http: http) else {
                         throw error
                     }

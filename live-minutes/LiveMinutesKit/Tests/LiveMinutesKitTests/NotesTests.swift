@@ -195,21 +195,28 @@ struct NotesOpDecodingTests {
 @MainActor
 @Suite("NotesStore")
 struct NotesStoreTests {
-    @Test("適用すると、ノートと直近に変更されたIDが変わる")
-    func applyUpdatesNotesAndHighlights() {
-        let store = NotesStore()
-        let ignored = store.apply([
+    @Test("適用の結果でノートとハイライトが変わり、ハイライトは少したつと消える。reset で一時停止もオフに戻る")
+    func receivesEvents() async {
+        let store = NotesStore(highlightDuration: .milliseconds(10))
+        let result = NotesReducer.apply([
             NotesOp(op: .addTopic, topicID: "new-1", title: "議題"),
             NotesOp(op: .addItem, topicID: "new-1", kind: .point, text: "要点"),
-            NotesOp(op: .removeItem, itemID: "i9"),
-        ])
+        ], to: Notes())
+        store.receive(.applied(result))
+        store.receive(.status(.updating))
+        store.receive(.dropped(2))
+
         #expect(store.notes.topics.count == 1)
         #expect(store.recentlyChangedIDs == ["t1", "i1"])
-        #expect(ignored.count == 1)
+        #expect(store.status == .updating)
+        #expect(store.hasDroppedSegments)
+        await waitUntil { store.recentlyChangedIDs.isEmpty }
 
-        store.clearHighlights()
-        #expect(store.recentlyChangedIDs.isEmpty)
+        store.isSendingPaused = true
         store.reset()
         #expect(store.notes.isEmpty)
+        #expect(store.status == .inactive)
+        #expect(store.isSendingPaused == false)
+        #expect(store.hasDroppedSegments == false)
     }
 }

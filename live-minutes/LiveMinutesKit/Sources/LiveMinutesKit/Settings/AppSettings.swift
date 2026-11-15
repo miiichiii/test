@@ -8,14 +8,14 @@ import Observation
 @Observable
 public final class AppSettings {
     // 既定値。モデルIDは 2026-11-15 に OpenAI の公式のモデル一覧で確認した（DESIGN.md §8 #3）。
-    public static let defaultLiveModelID = "gpt-6-luna"
-    public static let defaultFinalModelID = "gpt-6.1-sol"
-    public static let defaultLiveReasoningEffort = "low"
-    public static let defaultFinalReasoningEffort = "medium"
-    public static let defaultRecognitionLocaleIdentifier = "ja-JP"
-    public static let defaultNotesMinCharacters = 120
-    public static let defaultNotesMaxInterval: TimeInterval = 20
-    public static let defaultNotesMinInterval: TimeInterval = 8
+    public nonisolated static let defaultLiveModelID = "gpt-6-luna"
+    public nonisolated static let defaultFinalModelID = "gpt-6.1-sol"
+    public nonisolated static let defaultLiveReasoningEffort = "low"
+    public nonisolated static let defaultFinalReasoningEffort = "medium"
+    public nonisolated static let defaultRecognitionLocaleIdentifier = "ja-JP"
+    public nonisolated static let defaultNotesMinCharacters = 120
+    public nonisolated static let defaultNotesMaxInterval: TimeInterval = 20
+    public nonisolated static let defaultNotesMinInterval: TimeInterval = 8
 
     enum Key {
         static let liveModelID = "LiveMinutes.liveModelID"

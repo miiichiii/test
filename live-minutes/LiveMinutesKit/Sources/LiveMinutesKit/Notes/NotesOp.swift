@@ -60,4 +60,25 @@ public struct NotesOpsResponse: Codable, Equatable, Sendable {
     public static func decode(from data: Data) throws -> NotesOpsResponse {
         try JSONDecoder().decode(NotesOpsResponse.self, from: data)
     }
+
+    /// op 単位で寛容に読む。読めない op だけを捨て、その数を返す（1件の不正で応答全体を捨てないため）。
+    /// `ops` 自体がない、または JSON として読めない場合は投げる。
+    public static func decodeLossy(from data: Data) throws -> (ops: [NotesOp], skippedCount: Int) {
+        let lossy = try JSONDecoder().decode(LossyOps.self, from: data)
+        let ops = lossy.ops.compactMap(\.value)
+        return (ops, lossy.ops.count - ops.count)
+    }
+
+    private struct LossyOps: Decodable {
+        let ops: [Lossy<NotesOp>]
+    }
+}
+
+/// 読めなければ nil になる包み。`UnkeyedDecodingContainer` で直接 `try?` すると失敗時に位置が進まないので、この型で包む。
+struct Lossy<T: Decodable>: Decodable {
+    let value: T?
+
+    init(from decoder: any Decoder) throws {
+        value = try? T(from: decoder)
+    }
 }

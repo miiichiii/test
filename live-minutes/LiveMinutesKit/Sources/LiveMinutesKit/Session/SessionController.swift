@@ -95,6 +95,8 @@ public final class SessionController {
     /// 現在の（停止後は直前の）セッション。会議名と開始日時を画面と書き出しに使う
     public private(set) var sessionMeta: SessionMeta?
     public let transcript = TranscriptStore()
+    /// ライブ更新のノートと状態
+    public let notes = NotesStore()
     /// 入力レベル（0…1）
     public private(set) var inputLevel: Float = 0
 
@@ -104,6 +106,10 @@ public final class SessionController {
     private let repository: SessionRepository
     private let clock: any SessionClock
     private let recognitionLocale: @MainActor () -> Locale
+    private let notesEngineFactory: (@MainActor (SessionMeta, NotesStore) async -> NotesEngine?)?
+
+    /// 停止時に、ノートの残りの送信を待つ上限（秒）
+    static let notesFlushTimeout: TimeInterval = 15
 
     /// 準備を済ませたロケール（BCP 47）。設定で変わっていたら、次のセッションの開始時に準備し直す
     private var preparedLocaleIdentifier: String?
@@ -122,6 +128,10 @@ public final class SessionController {
     private var operation: Task<Void, Never>?
     private var failureTask: Task<Void, Never>?
     private var levelTask: Task<Void, Never>?
+    /// 今のセッションのライブ更新。API キーがなければ nil
+    private var notesEngine: NotesEngine?
+    /// 一時停止トグルの変更をエンジンへ順に伝える
+    private var notesPauseTask: Task<Void, Never>?
 
     private static let logger = Logger(subsystem: LiveMinutesInfo.logSubsystem, category: "Session")
 
@@ -131,7 +141,8 @@ public final class SessionController {
         permission: any MicrophonePermission,
         repository: SessionRepository,
         clock: any SessionClock,
-        recognitionLocale: @escaping @MainActor () -> Locale = { Locale(identifier: "ja-JP") }
+        recognitionLocale: @escaping @MainActor () -> Locale = { Locale(identifier: "ja-JP") },
+        notesEngineFactory: (@MainActor (SessionMeta, NotesStore) async -> NotesEngine?)? = nil
     ) {
         self.engine = engine
         self.source = source
@@ -139,6 +150,7 @@ public final class SessionController {
         self.repository = repository
         self.clock = clock
         self.recognitionLocale = recognitionLocale
+        self.notesEngineFactory = notesEngineFactory
     }
 
     // MARK: - 画面から読む値
@@ -197,17 +209,78 @@ public final class SessionController {
     }
 
     /// アプリの終了前に呼ぶ。処理中の操作を待ち、録音中・一時停止中なら停止して保存を終える。
+    /// ノートの残りは送らない（終了の上限時間に収めるため）。
     public func finishForTermination() async {
+        // 停止処理がノートの送信を待っている最中でも、すぐに抜けられるようにする。
+        await notesEngine?.abort()
         while true {
             if let operation {
                 await operation.value
                 continue
             }
             if activeSessionID != nil, state == .recording || state == .paused {
-                await perform(.stopping) { await self.finishSession() }
+                await perform(.stopping) { await self.finishSession(notesMode: .abandon) }
                 continue
             }
             return
+        }
+    }
+
+    // MARK: - ライブ更新
+
+    /// 「要約の送信を一時停止」を切り替える。オンの間に確定した発言は LLM に送らず、オフに戻しても送らない。
+    /// オンにした時点でまだ送っていない発言も捨てる（文字起こしには残る）。
+    public func setNotesSendingPaused(_ paused: Bool) {
+        guard notes.isSendingPaused != paused else { return }
+        notes.isSendingPaused = paused
+        guard let engine = notesEngine else { return }
+        // 切り替えの順序を保つため、前の変更を待ってから伝える。
+        let previous = notesPauseTask
+        notesPauseTask = Task {
+            await previous?.value
+            await engine.setPaused(paused)
+        }
+    }
+
+    /// ライブ更新の「再試行」。止まっている送信を再開する。
+    public func retryNotes() {
+        guard let engine = notesEngine else { return }
+        Task { await engine.retryNow() }
+    }
+
+    /// API キーを保存・削除したときに呼ぶ。止まっていた送信を再開し、会議中にキーが入ったらその時点からライブ更新を始める。
+    public func apiKeyDidChange() async {
+        if let engine = notesEngine {
+            await engine.retryNow()
+            return
+        }
+        guard activeSessionID != nil, let meta = sessionMeta else { return }
+        await attachNotesEngine(for: meta)
+    }
+
+    /// ライブ更新のエンジンを作って付ける。作れなければ（API キーなし）その旨を表示する。
+    private func attachNotesEngine(for meta: SessionMeta) async {
+        guard let factory = notesEngineFactory else {
+            notes.status = .notConfigured
+            return
+        }
+        let engine = await factory(meta, notes)
+        // 待っている間にセッションが終わった、または別の経路でエンジンができた場合は使わない。
+        guard activeSessionID == meta.id, notesEngine == nil else {
+            await engine?.abort()
+            return
+        }
+        guard let engine else {
+            notes.status = .notConfigured
+            return
+        }
+        notesEngine = engine
+        // 待っている間に一時停止トグルがオンになっていたら、エンジンにも伝える。
+        if notes.isSendingPaused {
+            notes.status = .paused
+            await engine.setPaused(true)
+        } else {
+            notes.status = .waiting
         }
     }
 
@@ -275,9 +348,12 @@ public final class SessionController {
         }
 
         transcript.reset()
+        notes.reset()
         warning = nil
         sessionMeta = meta
         activeSessionID = meta.id
+        // API キーがなければライブ更新は動かさず、文字起こしだけを続ける。
+        await attachNotesEngine(for: meta)
         accumulated = 0
         lastFinalEnd = 0
         runStartedAt = clock.uptime()
@@ -321,7 +397,9 @@ public final class SessionController {
     }
 
     /// セッションを終える。停止操作・認識の失敗・アプリの終了のどれからも、ここを通る。
-    private func finishSession() async {
+    /// 順序: 最終確定 → meta.json と transcript.jsonl を閉じる → ノートの残りを送る（上限つき）→ finished。
+    /// 保存を先に済ませるのは、ノートを待っている間に終了しても meta.json を finished にしておくため。
+    private func finishSession(notesMode: NotesEngine.FinishMode = .flush(timeout: SessionController.notesFlushTimeout)) async {
         guard activeSessionID != nil, var meta = sessionMeta else {
             // 通常は起きない。終了前の処理が空回りしないよう、セッションなしの状態にそろえる。
             activeSessionID = nil
@@ -353,6 +431,14 @@ public final class SessionController {
         }
         await repository.closeTranscript(for: meta.id)
         sessionMeta = meta
+
+        await notesPauseTask?.value
+        notesPauseTask = nil
+        if let engine = notesEngine {
+            await engine.finish(notesMode)
+            notesEngine = nil
+        }
+        notes.status = .inactive
         state = .finished
     }
 
@@ -390,6 +476,8 @@ public final class SessionController {
         )
         transcript.apply(.final(shifted))
         lastFinalEnd = max(lastFinalEnd, shifted.end)
+        // 「要約の送信を一時停止」がオンの間に確定した発言は、ノートの更新に渡さない（後からも送らない）。
+        let sendToNotes = !notes.isSendingPaused
         do {
             try await repository.appendSegment(shifted, to: sessionID)
         } catch {
@@ -398,6 +486,9 @@ public final class SessionController {
                 Self.logger.error("transcript.jsonl に追記できない: \(String(describing: error), privacy: .public)")
                 warning = .transcriptNotSaved
             }
+        }
+        if sendToNotes, let engine = notesEngine {
+            await engine.add(shifted)
         }
     }
 
@@ -447,6 +538,11 @@ public final class SessionController {
     }
 
     // MARK: - テスト用
+
+    /// 一時停止トグルの変更がエンジンに伝わるまで待つ。
+    func waitForNotesPauseChange() async {
+        await notesPauseTask?.value
+    }
 
     /// イベントの読み取りと、それに続く処理（認識の失敗による終了など）が終わるまで待つ。
     /// 録音中にストリームが終わらない場合は戻らないので、ストリームを終わらせてから呼ぶ。
