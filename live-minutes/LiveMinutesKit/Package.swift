@@ -20,6 +20,8 @@ let package = Package(
     targets: [
         .target(
             name: "LiveMinutesKit",
+            // プロンプトとスキーマ。Bundle.module から読む（LLMResources）。
+            resources: [.copy("Resources")],
             swiftSettings: swiftSettings
         ),
         .testTarget(

@@ -56,12 +56,13 @@ extension TranscriptionError: LocalizedError {
 
 /// 文字起こしエンジン。
 ///
-/// - `prepare(progress:)`: ロケールの確認、モデルの導入、入力形式の決定。一度成功すれば以後は呼ばなくてよい
+/// - `prepare(locale:progress:)`: ロケールの確認、モデルの導入、入力形式の決定。同じロケールで一度成功すれば、
+///   以後は呼ばなくてよい。別のロケールで呼び直すと、以後の `start` はそのロケールで認識する
 /// - `start(source:)`: 音声ソースを開始し、イベントのストリームを返す。途中で失敗した場合は、ソースを止めてから
 ///   ストリームをエラーで終える
 /// - `stop()`: ソースを止め、最後の未確定分まで確定させてからストリームを終える
 public protocol TranscriptionEngine: AnyObject, Sendable {
-    func prepare(progress: @escaping @Sendable (Double) -> Void) async throws
+    func prepare(locale: Locale, progress: @escaping @Sendable (Double) -> Void) async throws
     func start(source: any AudioSource) async throws -> AsyncThrowingStream<TranscriptEvent, any Error>
     func stop() async
 }

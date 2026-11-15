@@ -11,7 +11,7 @@ import Testing
 actor ScriptedEngine: TranscriptionEngine {
     private var eventsPerStart: [[TranscriptEvent]]
     private let eventsOnStop: [TranscriptEvent]
-    private let prepareError: (any Error)?
+    private var prepareError: (any Error)?
     private var startError: (any Error)?
     private var continuation: AsyncThrowingStream<TranscriptEvent, any Error>.Continuation?
     private var isStopHeld = false
@@ -36,8 +36,11 @@ actor ScriptedEngine: TranscriptionEngine {
 
     var isRunning: Bool { continuation != nil }
 
-    func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {
+    private(set) var preparedLocales: [String] = []
+
+    func prepare(locale: Locale, progress: @escaping @Sendable (Double) -> Void) async throws {
         prepareCount += 1
+        preparedLocales.append(locale.identifier(.bcp47))
         progress(0.5)
         if let prepareError { throw prepareError }
     }
@@ -64,6 +67,10 @@ actor ScriptedEngine: TranscriptionEngine {
         }
         eventsOnStop.forEach { continuation.yield($0) }
         continuation.finish()
+    }
+
+    func setPrepareError(_ error: (any Error)?) {
+        prepareError = error
     }
 
     func setStartError(_ error: (any Error)?) {
@@ -152,9 +159,10 @@ func waitUntil(
     _ condition: () async -> Bool,
     sourceLocation: SourceLocation = #_sourceLocation
 ) async {
-    for _ in 0..<10_000 {
+    // 別スレッドで進む処理（URLSession など）も待てるよう、少しずつ眠りながら最大5秒待つ。
+    for _ in 0..<5_000 {
         if await condition() { return }
-        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(1))
     }
     Issue.record("条件が満たされないまま待ち時間の上限に達した", sourceLocation: sourceLocation)
 }

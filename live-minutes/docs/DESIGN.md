@@ -68,7 +68,7 @@ live-minutes/
 │   │   ├── Settings/
 │   │   ├── Persistence/
 │   │   ├── Session/
-│   │   └── Resources/           プロンプトとスキーマ（Phase 3 で docs/ から移す）
+│   │   └── Resources/           プロンプトとスキーマ（Phase 3 で docs/ から移した）
 │   └── Tests/LiveMinutesKitTests/
 └── docs/
 ```
@@ -110,10 +110,10 @@ Phase 7 でシステム音声用の実装を足せるよう、文字起こし側
 ### 4.2 Transcription
 
 - `TranscriptionEngine`（protocol）: 次の3つを持つ
-  - `prepare(progress:)`: 手順1〜4（ロケールの確認、モデルの導入、入力形式の決定）。一度成功すれば以後は呼ばない
+  - `prepare(locale:progress:)`: 手順1〜4（ロケールの確認、モデルの導入、入力形式の決定）。同じロケールで一度成功すれば以後は呼ばない。認識言語は設定（§4.8）で選び、`SessionController` が新しいセッションの開始時に設定のロケールと準備済みのロケールを比べ、違えば `prepare` し直す（エンジンは作り直さない。再開では変えない）。実行中の `prepare` は `alreadyRunning` で断る（ロケールと入力形式が実行中のものと食い違わないように）
   - `start(source:) async throws -> AsyncThrowingStream<TranscriptEvent, Error>`: `AudioSource` を開始し、イベントのストリームを返す。録音中に認識が失敗したら、ソースを止めてからストリームをエラーで終える（マイクを点けたままにしない）
   - `stop()`: ソースを止め、最後の未確定分まで確定させてからストリームを終える
-- `AppleSpeechEngine`（actor）: `SpeechAnalyzer` + `SpeechTranscriber` による実装。対象ロケールは init で渡す（Phase 1 は `ja-JP` 固定。設定から選べるようにするのは後のフェーズ）
+- `AppleSpeechEngine`（actor）: `SpeechAnalyzer` + `SpeechTranscriber` による実装。対象ロケールは `prepare(locale:progress:)` で渡す。設定画面の候補は `AppleSpeechEngine.supportedLocaleIdentifiers()`（BCP 47 の識別子）
 - `TranscriptEvent`: `.volatile(text)`（未確定の途中結果）と `.final(TranscriptSegment)`（確定）
 - `TranscriptSegment`: `id`、`start`（秒）、`end`（秒）、`text`
 - `TranscriptionError`: 端末で使えない / ロケール非対応 / モデルのダウンロード失敗 / 入力形式なし / 準備前 / 二重開始 を区別する
@@ -145,13 +145,13 @@ Phase 7 でシステム音声用の実装を足せるよう、文字起こし側
 
 ### 4.4 Notes
 
-- `Notes`: `topics: [Topic]`
+- `Notes`: `topics: [Topic]` と、採番用の `nextTopicNumber` / `nextItemNumber`（削除した番号を再利用しないため。Phase 4 で LLM に送る JSON には含めない）
 - `Topic`: `id`、`title`、`items: [NoteItem]`
 - `NoteItem`: `id`、`kind`（`NoteKind`）、`text`、`owner?`、`due?`
 - `NoteKind`: `point`（要点）/ `decision`（決定事項）/ `action`（ToDo）/ `question`（未解決の質問）
-- `NotesOp`: [notes-ops.schema.json](schemas/notes-ops.schema.json) の1要素に対応する型
+- `NotesOp`: [notes-ops.schema.json](../LiveMinutesKit/Sources/LiveMinutesKit/Resources/notes-ops.schema.json) の1要素に対応する型
 - `NotesReducer.apply(_:to:)`: opsをノートに適用する純粋関数。適用できなかったopの一覧も返す
-- `NotesStore`（`@MainActor`、`@Observable`）: 現在のノートと、直近に変更された項目ID（ハイライト用）を持つ
+- `NotesStore`（`@MainActor`、`@Observable`）: 現在のノートと、直近に変更された項目ID（ハイライト用）を持つ。ハイライトを数秒で消す動作は Phase 4
 
 IDはアプリが採番する（トピックは `t1`, `t2` …、項目は `i1`, `i2` …）。モデルにIDを作らせると重複や衝突が起きるため。
 
@@ -165,7 +165,14 @@ IDはアプリが採番する（トピックは `t1`, `t2` …、項目は `i1`,
 | `update_item` | null でないフィールドだけ上書きする | `item_id` が存在しない |
 | `remove_item` | 項目を削除する | `item_id` が存在しない |
 
-無視したopは例外にせず、理由とともにログへ残す。1回の応答で適用するopは最大20件とし、超えた分は捨てる（モデルの暴走でノートが埋まるのを防ぐ）。
+無視したopは例外にせず、理由とともにログへ残す（ログには op の種類と理由だけを出し、`title` や `text` は会議の内容なので出さない）。1回の応答で適用するopは最大20件とし、超えた分は捨てる（モデルの暴走でノートが埋まるのを防ぐ）。
+
+Phase 3 で決めた細かい規則:
+
+- 20件の上限は応答の先頭から20件（無視したものも数える）。21件目以降は理由「上限超過」で無視する
+- 仮IDは1回の適用の中だけで有効。`topic_id` は、まずこの応答内の仮IDとして解決し、なければ既存のIDとして探す（仮IDが `t1` のように実IDと同じ形でも、同じ応答の `add_topic` を優先する）。同じ仮IDが2回出たら、後の `add_topic` を指す
+- `title` と `text` は前後の空白を除き、空白だけなら空として扱う。`update_item` では、null と空のフィールドは変えない。何も変わらなかった `update_item` はハイライトしない
+- 同じ応答の中で追加して削除した項目は、変更されたIDに含めない
 
 ### 4.5 NotesEngine（ライブ更新）
 
@@ -213,7 +220,7 @@ Luna への入力（ユーザーメッセージ。JSON文字列）:
 }
 ```
 
-Luna の出力（[notes-ops.schema.json](schemas/notes-ops.schema.json) に従う）:
+Luna の出力（[notes-ops.schema.json](../LiveMinutesKit/Sources/LiveMinutesKit/Resources/notes-ops.schema.json) に従う）:
 
 ```json
 {
@@ -224,7 +231,7 @@ Luna の出力（[notes-ops.schema.json](schemas/notes-ops.schema.json) に従�
 }
 ```
 
-システムプロンプトは [live-notes.system.md](prompts/live-notes.system.md)。リクエストごとに変わらないので、常に同じ文字列を先頭に置く（プロバイダ側のプロンプトキャッシュが効きやすくなる）。日時など変わる値をシステムプロンプトに埋め込まない。
+システムプロンプトは [live-notes.system.md](../LiveMinutesKit/Sources/LiveMinutesKit/Resources/live-notes.system.md)。リクエストごとに変わらないので、常に同じ文字列を先頭に置く（プロバイダ側のプロンプトキャッシュが効きやすくなる）。日時など変わる値をシステムプロンプトに埋め込まない。
 
 長い会議でノートが大きくなった場合の扱いは Phase 6 で入れる（全トピックのタイトルと、直近3トピックの全項目だけを送る）。
 
@@ -232,7 +239,7 @@ Luna の出力（[notes-ops.schema.json](schemas/notes-ops.schema.json) に従�
 
 `MinutesWriter` が、会議終了時に文字起こし全文とノートを Sol に送り、議事録のMarkdownを受け取る。応答はストリーミングで受け、届いた分から画面に表示する。
 
-- システムプロンプト: [final-minutes.system.md](prompts/final-minutes.system.md)
+- システムプロンプト: [final-minutes.system.md](../LiveMinutesKit/Sources/LiveMinutesKit/Resources/final-minutes.system.md)
 - 入力: `meeting`（会議名、開始日時、所要時間、glossary）、`transcript`（開始時刻つきの全文）、`notes`
 - 出力: Markdown（構造化出力は使わない）
 - 結果は `minutes.md` に保存する。作り直しもできる
@@ -240,33 +247,55 @@ Luna の出力（[notes-ops.schema.json](schemas/notes-ops.schema.json) に従�
 ### 4.7 LLM
 
 - `LLMClient`（protocol）: 構造化出力のリクエストと、テキストのストリーミングリクエストの2つを持つ。`NotesEngine` と `MinutesWriter` はこのprotocolだけに依存する
-- `OpenAIResponsesClient`: `URLSession` による実装。外部ライブラリは使わない
-- `LLMError`: 認証エラー / レート制限 / サーバーエラー / タイムアウト / 拒否 / 出力不正 を区別する
+- `OpenAIResponsesClient`: `URLSession` による実装（既定は応答をディスクに残さない `.ephemeral`）。外部ライブラリは使わない。`URLSession`、エンドポイント、API キーの読み出し、再試行の待ち関数は init で渡す（テストでは `URLProtocol` のスタブを入れたセッションを渡す）
+- `LLMError`: APIキーなし / キーチェーンから読めない / 認証エラー（401）/ 権限エラー（403）/ 利用上限の不足（429 の `insufficient_quota`）/ レート制限（429）/ サーバーエラー（5xx）/ リクエストの誤り（400・404 など。モデルIDの誤りを含み、API の説明文を持つ）/ タイムアウト / 通信エラー / 拒否 / 途中で終わった（`incomplete`）/ 出力不正 / 失敗（`failed`、error イベント）を区別する。画面には日本語の説明を出す
+- `LLMResources`: 同梱のプロンプトとスキーマ（`LiveMinutesKit/Sources/LiveMinutesKit/Resources/`）を `Bundle.module` から読む
 
-再試行の方針: 429 と 5xx と通信エラーは、間隔を空けて最大2回まで再試行する。401・400 は再試行しない（設定の誤りなので、画面に出す）。ライブ更新のタイムアウトは30秒。
+再試行の方針: 429（`insufficient_quota` を除く）と 5xx と一時的な通信エラー（接続が切れた、ホストにつながらない、DNS の失敗など）は、1秒・2秒の間隔で最大2回まで再試行する。`Retry-After`（秒数か HTTP 日付）があればそれに従い、5秒を超えるなら待たずに失敗として返す（ライブ更新は次の周期で送り直すため）。401・403・400・404 などは再試行しない（設定の誤りなので、画面に出す）。ネットワークにつながっていない場合とタイムアウトも再試行しない。キャンセルは通信エラーとして扱わず、そのまま `CancellationError` で返す。
 
-OpenAI Responses API の想定形（**未確認。§8 を参照し、実装前に公式ドキュメントで確認する**）:
+ストリーミングを読む側の Task がキャンセルされると、`AsyncThrowingStream` はエラーなしで終わる。途中までの結果（議事録など）を完了したものとして保存しないよう、読み終えた後に `try Task.checkCancellation()` を呼ぶ（Phase 5 の `MinutesWriter` で守る）。
+
+タイムアウト: 構造化出力は、再試行を含むリクエスト全体に締め切りを設ける（ライブ更新は30秒）。APIキーの読み出し（キーチェーンの許可ダイアログを待つことがある）は締め切りの前に済ませる。ストリーミングは、応答が始まるまでと差分の間の無通信の時間に上限を設ける（既定180秒。推論中は無通信が続きうるため）。
+
+リクエストの形（2026-11-15 に公式ドキュメントと公式 Python SDK で確認。§8 #4）:
 
 ```json
 {
   "model": "<ライブ更新用モデルID>",
   "instructions": "<システムプロンプト>",
   "input": "<入力JSONの文字列>",
+  "store": false,
+  "reasoning": { "effort": "low" },
   "text": {
     "format": { "type": "json_schema", "name": "notes_ops", "strict": true, "schema": { } }
-  },
-  "store": false
+  }
 }
 ```
 
-`store: false` は、応答をOpenAI側に保存させないための指定。
+- `store: false` は、応答を OpenAI 側に保存させないための指定（既定では30日保存される）。必ず送る
+- `reasoning` は推論量の指定。設定値が空なら送らない（対応していないモデルで 400 にならないように）
+- スキーマはリソースのバイト列をそのまま埋め込み、キーの順序を保つ（構造化出力はスキーマのプロパティの順に出力を作るため。`op` を先に書かせる）。他のフィールドは個別にエンコードしてつなぐ
+- ストリーミングは `"stream": true` を足し、`instructions` 以降は同じ
+
+応答の読み方:
+
+- 構造化出力: まず `status`（`failed` なら `error`、`incomplete` なら `incomplete_details.reason`）を見る。次に `output` の type `message` の `content` を見て、type `refusal` があれば拒否、type `output_text` の `text` をすべてつなぐ（推論の項目が先に来るので、message 以外は無視する）。`output_text` をまとめるプロパティは SDK の便利機能で、生の JSON にはない。つないだ結果が JSON として読めなければ出力不正
+- エラー応答の本文は `{"error": {"message", "type", "code", "param"}}`。401 の `message` はキーの一部を含むので、表示もログ出力もしない
+- 応答の型は寛容に読む（未知の項目や想定外の形のフィールドは無視し、読めるものだけ読む）
+- ストリーミング: SSE の `data:` 行の JSON を読む（`event:` 行は使わない。`data: [DONE]` は無視）。行の区切りは CR / LF だけにする（`AsyncBytes.lines` は U+2028 などでも行を切るので使わない）。`URLSession` は `Content-Type` のない応答では中身の判定のために先頭（最大512バイト）を溜めるので、差分がすぐ届くのはサーバーが `Content-Type: text/event-stream` を返す場合（テストのスタブで確認。OpenAI の実際の応答ヘッダは Phase 5 で確かめる）。`response.output_text.delta` の `delta` を順に返し、`response.completed` で正常に終わる。`response.refusal.delta` は拒否、`response.failed` / `response.incomplete` / `error` は失敗。`response.completed` を受けずに切れたら通信エラー。差分を返し始めた後は再試行しない（同じ文が重複するため）。エラー応答（2xx 以外）の本文は SSE ではなく JSON
+
+ログ: `LLMError` は `logSummary`（ケース名、HTTP ステータス、エラーコードだけ）で出す。API の説明文、拒否の文、リクエストや応答の本文、API キーはログに出さない。
 
 ### 4.8 Settings
 
-- `AppSettings`: モデルID（ライブ用・仕上げ用）、認識言語（既定 `ja-JP`）、送信条件の各値、glossary。`UserDefaults` に保存する
-- `KeychainStore`: OpenAIのAPIキーをKeychainに保存する
+- `AppSettings`（`@MainActor`、`@Observable`）: モデルID（ライブ用 既定 `gpt-6-luna`・仕上げ用 既定 `gpt-6.1-sol`。リクエストには前後の空白を除いた `effectiveLiveModelID` / `effectiveFinalModelID` を使い、接続テストと本番で同じ値にする）、推論量（ライブ用 既定 `low`・仕上げ用 既定 `medium`。画面には出さない）、認識言語（既定 `ja-JP`。BCP 47 にそろえて保存する）、送信条件の各値、glossary。`UserDefaults` に保存する
+- `SecretStore`（protocol）: APIキーの保存先。`KeychainStore` が実装し、テストではメモリ上の実装に差し替える
+- `KeychainStore`: OpenAIのAPIキーを、従来のキーチェーン（ログインキーチェーン）に汎用パスワードとして保存する。データ保護キーチェーンは keychain-access-groups とチームの署名が要るので使わない。iCloud への同期はしない。保存は前後の空白と改行を除き、消してから追加する（今のビルドのアクセス権で作り直すため）。「保存済みか」は値を読まずに属性だけで確かめる。キーチェーンの操作は許可ダイアログの間止まるので、メインスレッド以外で行う
+- `ConnectionTest`（`@MainActor`、`@Observable`）: 設定画面の「接続テスト」。ライブ更新用のモデルに、ノートのスキーマを使う構造化出力を1回求め、APIキー・モデルID・スキーマの受理をまとめて確かめる
 
-APIキーは `UserDefaults` やファイルには書かない。モデルIDはコードに埋め込まず、設定値として持つ（モデルの世代交代でIDが変わっても、アプリを作り直さずに済むようにするため）。
+APIキーは `UserDefaults` やファイル、ログには書かない。起動時には読まず、リクエストのたびにキーチェーンから読む。モデルIDはコードに埋め込まず、設定値として持つ（モデルの世代交代でIDが変わっても、アプリを作り直さずに済むようにするため）。
+
+ad-hoc 署名なので、ビルドし直した後の最初の読み出しで、キーチェーンのアクセス許可ダイアログが出ることがある（署名が変わるため）。
 
 ### 4.9 Persistence
 
@@ -320,6 +349,7 @@ Phase 2 で決めたこと:
 - 右: ノート。トピックごとに項目を並べ、種類（要点 / 決定 / ToDo / 質問）をバッジで示す。ToDoには担当と期限を添える。追加・更新された項目は数秒間ハイライトする
 - ツールバー: 録音開始 / 一時停止 / 停止、経過時間、入力レベル、LLMの状態（更新中 / 待機 / エラー）、「要約の送信を一時停止」トグル、設定
 - 終了後: 議事録の表示、Markdownのコピーと保存
+- 設定画面（SwiftUI の `Settings` シーン。Cmd+, かツールバーの設定ボタン）: APIキーの入力（伏せ字。保存済みかだけを表示し、値は表示しない。保存後は入力欄を空にする）・保存・削除、モデルID（ライブ更新用・議事録の仕上げ用）、「接続テスト」、認識言語（次に開始する会議から反映）
 
 色だけに頼らず、種類はラベルの文字でも分かるようにする。
 
@@ -363,9 +393,9 @@ Phase 2 で決めたこと:
 |---|---|---|---|
 | 1 | 実機の `SpeechTranscriber.supportedLocales` に `ja-JP` が含まれるか | Phase 1 | 含まれる（2026-11-15、macOS 27.2 / Xcode 27.2 の実機で確認）。対応ロケールは45件で、`supportedLocale(equivalentTo: ja-JP)` も `ja-JP` を返す。この機種では `installedLocales` にも `ja-JP` があり、`assetInstallationRequest(supporting:)` は nil（ダウンロード不要）だった。ただし、その呼び出し前の `AssetInventory.status(forModules:)` は `.supported` で、呼び出し後に `.installed` に変わった。状態の判定に `status` を使わず、§4.2 の手順3どおり `assetInstallationRequest` の結果で判断する |
 | 2 | `SpeechAnalyzer` の利用に音声認識の権限（`NSSpeechRecognitionUsageDescription`）が必要か。不要でも Info.plist に入れておいて害はない | Phase 1 | 不要と判断（2026-11-15）。Info.plist も権限要求もない、サンドボックスなしのコマンドラインツールで、日本語の音声ファイルを `SpeechAnalyzer` + `SpeechTranscriber` で最後まで文字起こしでき、許可のダイアログも出なかった。サンドボックス下のアプリでも出ないかは、Phase 1 の人による確認で見る。キーは Info.plist に残す |
-| 3 | OpenAI の Sol / Luna の正確なモデルID。設計時は公式サイトに接続できず、第三者の記事では `gpt-6.1-sol` / `gpt-6-luna` と `gpt-5.6-sol` / `gpt-5.6-luna` が混在していた | Phase 3 | 未確認 |
-| 4 | Responses API の構造化出力のリクエスト形（§4.7）、応答から出力テキストと拒否を読み取る方法、`store` パラメータ、ストリーミングのイベント名 | Phase 3 | 未確認 |
-| 5 | [notes-ops.schema.json](schemas/notes-ops.schema.json) がそのまま strict モードで受理されるか（null を含む `enum` の書き方など） | Phase 3 | 未確認 |
-| 6 | Sol / Luna で推論量を下げる指定（応答を速くするため）があるか、その名前 | Phase 3 | 未確認 |
+| 3 | OpenAI の Sol / Luna の正確なモデルID。設計時は公式サイトに接続できず、第三者の記事では `gpt-6.1-sol` / `gpt-6-luna` と `gpt-5.6-sol` / `gpt-5.6-luna` が混在していた | Phase 3 | 確認済み（2026-11-15、developers.openai.com/api/docs/models と各モデルのページ）。Flagship は `gpt-6-astra` / `gpt-6.1-sol` / `gpt-6.1-terra` / `gpt-6-luna`。Sol は `gpt-6.1-sol`、Luna は `gpt-6-luna`（どちらもスナップショットはこの1つだけで、Responses API・構造化出力・ストリーミングに対応）。これを既定値にした。`gpt-5.6-*` は前の世代。実際に呼べるかは人による接続テストで確かめる |
+| 4 | Responses API の構造化出力のリクエスト形（§4.7）、応答から出力テキストと拒否を読み取る方法、`store` パラメータ、ストリーミングのイベント名 | Phase 3 | 確認済み（2026-11-15、公式ドキュメントの structured outputs・conversation state・streaming のガイドと、公式 Python SDK の型定義）。形は設計時の想定どおりで、§4.7 に応答の読み方とイベント名を書き足した。`store` は既定で保存（30日）で、`false` で保存しない。`output_text` の集約は SDK の便利機能で生の JSON にはない。API リファレンスのページは大きすぎて全体を読めなかったため、イベント名と応答のフィールドは公式 SDK のソースで確かめた。実際の応答での動作は人による接続テストで確かめる |
+| 5 | [notes-ops.schema.json](../LiveMinutesKit/Sources/LiveMinutesKit/Resources/notes-ops.schema.json) がそのまま strict モードで受理されるか（null を含む `enum` の書き方など） | Phase 3 | 一部確認（2026-11-15）。公式の Supported schemas で、全プロパティ必須・`additionalProperties: false`・`["string", "null"]` の型配列・入れ子の `anyOf` が使えることを確認した。`enum` に `null` を含める書き方が許されるかは明記がなく確認できなかったため、`kind` を文書化された形 `anyOf: [{type: string, enum: [...]}, {type: null}]` に書き換えた（意味は同じ。§4.4・§4.5 の例は変更不要）。実際の API で受理されるかは、接続テストがこのスキーマを使うので、人による接続テストで確かめる。未確認 |
+| 6 | Sol / Luna で推論量を下げる指定（応答を速くするため）があるか、その名前 | Phase 3 | 確認済み（2026-11-15、reasoning ガイドと各モデルのページ）。`reasoning: {"effort": ...}`。`gpt-6-luna` は `none` / `low` / `medium`（既定）/ `high` / `xhigh` / `max`、`gpt-6.1-sol` は `low` / `medium`（既定）/ `high` / `xhigh` / `max`（`none` は不可）。`none` が最も速い。ライブ更新は `low`（追加か更新か、要点か決定かの判断に少し推論を残す。送信間隔が8〜20秒なので数秒の差は問題にならない）、議事録は `medium` を既定にした。`max_output_tokens` は推論のトークンも含み、小さいと出力が空のまま `incomplete` になるので指定しない |
 | 7 | 専門用語を音声認識に反映させるAPIの有無と名前 | Phase 6 | 未確認 |
 | 8 | システム音声の取り込み方法（Core Audio のプロセスtap など）と必要な権限 | Phase 7 | 未確認 |

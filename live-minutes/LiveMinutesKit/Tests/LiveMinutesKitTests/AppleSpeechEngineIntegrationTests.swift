@@ -18,8 +18,8 @@ struct AppleSpeechEngineIntegrationTests {
     @Test("音声ファイルを流すと未確定と確定のイベントが届き、停止で最後まで確定する。2回目の開始もできる")
     func transcribesAudioFile() async throws {
         let path = try #require(ProcessInfo.processInfo.environment["LIVEMINUTES_SPEECH_AUDIO"])
-        let engine = AppleSpeechEngine(locale: Locale(identifier: "ja-JP"))
-        try await engine.prepare { _ in }
+        let engine = AppleSpeechEngine()
+        try await engine.prepare(locale: Locale(identifier: "ja-JP")) { _ in }
 
         let analyzerFormat = try #require(await engine.preparedAudioFormat)
         let chunks = try Self.loadChunks(path: path, outputFormat: analyzerFormat)

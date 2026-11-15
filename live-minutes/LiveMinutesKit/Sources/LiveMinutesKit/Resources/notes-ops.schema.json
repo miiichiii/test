@@ -26,8 +26,10 @@
             "description": "add_topic / rename_topic: トピックの短いタイトル。それ以外は null。"
           },
           "kind": {
-            "type": ["string", "null"],
-            "enum": ["point", "decision", "action", "question", null],
+            "anyOf": [
+              { "type": "string", "enum": ["point", "decision", "action", "question"] },
+              { "type": "null" }
+            ],
             "description": "add_item: 必須。update_item: 変更するときだけ指定し、変えないなら null。point=要点、decision=決定事項、action=ToDo、question=未解決の質問。"
           },
           "text": {

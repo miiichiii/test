@@ -92,6 +92,63 @@ struct SessionControllerTests {
         #expect(await engine.startCount == 2)
     }
 
+    @Test("認識言語が変わっていたら、次の開始で準備し直す。同じなら準備しない。再開では変えない")
+    func recognitionLocaleChange() async throws {
+        let dir = try TemporaryDirectory()
+        defer { dir.remove() }
+        let engine = ScriptedEngine()
+        let locale = LocaleHolder(identifier: "ja-JP")
+        let controller = SessionController(
+            engine: engine,
+            source: source,
+            permission: FixedPermission(granted: true),
+            repository: SessionRepository(rootDirectory: dir.url),
+            clock: clock,
+            recognitionLocale: { Locale(identifier: locale.identifier) }
+        )
+
+        await controller.start()
+        locale.identifier = "en_US"
+        await controller.pause()
+        await controller.resume()
+        await controller.stop()
+        #expect(await engine.preparedLocales == ["ja-JP"])
+
+        await controller.start()
+        await controller.stop()
+        await controller.start()
+        await controller.stop()
+        #expect(await engine.preparedLocales == ["ja-JP", "en-US"])
+    }
+
+    @Test("新しい言語の準備に失敗したら、次の開始でもう一度準備する")
+    func retriesPrepareAfterFailure() async throws {
+        let dir = try TemporaryDirectory()
+        defer { dir.remove() }
+        let engine = ScriptedEngine()
+        let locale = LocaleHolder(identifier: "ja-JP")
+        let controller = SessionController(
+            engine: engine,
+            source: source,
+            permission: FixedPermission(granted: true),
+            repository: SessionRepository(rootDirectory: dir.url),
+            clock: clock,
+            recognitionLocale: { Locale(identifier: locale.identifier) }
+        )
+        await controller.start()
+        await controller.stop()
+
+        locale.identifier = "en-US"
+        await engine.setPrepareError(TranscriptionError.modelDownloadFailed("offline"))
+        await controller.start()
+        #expect(controller.problem == .modelDownloadFailed)
+
+        await engine.setPrepareError(nil)
+        await controller.start()
+        #expect(controller.state == .recording)
+        #expect(await engine.preparedLocales == ["ja-JP", "en-US", "en-US"])
+    }
+
     @Test("finished から開始すると新しいセッションになり、前回の文字起こしは消える")
     func restartFromFinished() async throws {
         let dir = try TemporaryDirectory()
@@ -583,5 +640,15 @@ struct TranscriptStoreTests {
 
         store.reset()
         #expect(store.segments.isEmpty)
+    }
+}
+
+/// テストの途中で認識言語を変えるための入れ物。
+@MainActor
+final class LocaleHolder {
+    var identifier: String
+
+    init(identifier: String) {
+        self.identifier = identifier
     }
 }

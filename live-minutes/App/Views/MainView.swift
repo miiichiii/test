@@ -19,6 +19,12 @@ struct MainView: View {
             RecordingToolbar(controller: controller) {
                 isStartSheetPresented = true
             }
+            ToolbarItem(placement: .primaryAction) {
+                SettingsLink {
+                    Label("設定", systemImage: "gearshape")
+                }
+                .help("設定を開く")
+            }
         }
         .sheet(isPresented: $isStartSheetPresented) {
             StartSessionSheet { title in

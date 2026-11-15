@@ -8,12 +8,12 @@ import Speech
 ///
 /// `SpeechAnalyzer` は一度 finish すると再利用できないため、`start(source:)` のたびに
 /// `SpeechTranscriber` と `SpeechAnalyzer` を作り直す。`prepare` で保持するのはロケールと入力形式だけ。
+/// 認識言語は `prepare(locale:progress:)` で渡す（設定で変えたら、次のセッションの開始前に呼び直す）。
 public actor AppleSpeechEngine: TranscriptionEngine {
     private enum State {
         case idle, starting, running, stopping
     }
 
-    private let requestedLocale: Locale
     private var locale: Locale?
     private var analyzerFormat: AVAudioFormat?
 
@@ -33,16 +33,22 @@ public actor AppleSpeechEngine: TranscriptionEngine {
     /// prepare で決めた入力形式（テスト用）。
     var preparedAudioFormat: AVAudioFormat? { analyzerFormat }
 
-    public init(locale: Locale = Locale(identifier: "ja-JP")) {
-        requestedLocale = locale
+    public init() {}
+
+    /// この Mac で端末内の音声認識が対応しているロケール（BCP 47 の識別子、並べ替え済み）。設定画面の一覧に使う。
+    public static func supportedLocaleIdentifiers() async -> [String] {
+        let identifiers = await SpeechTranscriber.supportedLocales.map { $0.identifier(.bcp47) }
+        return Array(Set(identifiers)).sorted()
     }
 
     // MARK: - prepare（手順1〜4）
 
-    public func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {
+    public func prepare(locale requestedLocale: Locale, progress: @escaping @Sendable (Double) -> Void) async throws {
+        // 実行中に認識言語を変えない（次の start から反映する）。
+        guard state == .idle else { throw TranscriptionError.alreadyRunning }
         guard SpeechTranscriber.isAvailable else { throw TranscriptionError.transcriberUnavailable }
         guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: requestedLocale) else {
-            throw TranscriptionError.unsupportedLocale(requestedLocale.identifier)
+            throw TranscriptionError.unsupportedLocale(requestedLocale.identifier(.bcp47))
         }
         let transcriber = Self.makeTranscriber(locale: supported)
 

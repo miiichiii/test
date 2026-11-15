@@ -49,7 +49,7 @@ public final class SessionController {
             case .transcriberUnavailable:
                 "この Mac では端末内の音声認識を使えません。"
             case .unsupportedLocale:
-                "日本語の音声認識に対応していません。"
+                "選んだ言語の音声認識に対応していません。設定画面で別の言語を選んでください。"
             case .modelDownloadFailed:
                 "音声認識モデルのダウンロードに失敗しました。ネットワークを確認して、もう一度開始してください。"
             case .saveFailed:
@@ -103,8 +103,10 @@ public final class SessionController {
     private let permission: any MicrophonePermission
     private let repository: SessionRepository
     private let clock: any SessionClock
+    private let recognitionLocale: @MainActor () -> Locale
 
-    private var isPrepared = false
+    /// 準備を済ませたロケール（BCP 47）。設定で変わっていたら、次のセッションの開始時に準備し直す
+    private var preparedLocaleIdentifier: String?
     /// 録音中・一時停止中のセッション。終了処理を始めた時点で nil にする（終了処理を二重に走らせないため）
     private var activeSessionID: UUID?
     /// これまでの録音区間の合計（秒）
@@ -128,13 +130,15 @@ public final class SessionController {
         source: any AudioSource,
         permission: any MicrophonePermission,
         repository: SessionRepository,
-        clock: any SessionClock
+        clock: any SessionClock,
+        recognitionLocale: @escaping @MainActor () -> Locale = { Locale(identifier: "ja-JP") }
     ) {
         self.engine = engine
         self.source = source
         self.permission = permission
         self.repository = repository
         self.clock = clock
+        self.recognitionLocale = recognitionLocale
     }
 
     // MARK: - 画面から読む値
@@ -238,11 +242,15 @@ public final class SessionController {
 
         let events: AsyncThrowingStream<TranscriptEvent, any Error>
         do {
-            if !isPrepared {
-                try await engine.prepare { [weak self] value in
+            // 認識言語は新しいセッションの開始時にだけ反映する（再開では変えない）。
+            let locale = recognitionLocale()
+            let localeIdentifier = locale.identifier(.bcp47)
+            if preparedLocaleIdentifier != localeIdentifier {
+                preparedLocaleIdentifier = nil
+                try await engine.prepare(locale: locale) { [weak self] value in
                     Task { @MainActor in self?.updatePreparingProgress(value) }
                 }
-                isPrepared = true
+                preparedLocaleIdentifier = localeIdentifier
             }
             events = try await engine.start(source: source)
         } catch {

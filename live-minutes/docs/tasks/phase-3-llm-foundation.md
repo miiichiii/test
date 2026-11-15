@@ -8,7 +8,7 @@ OpenAI API を呼ぶクライアント、設定画面、ノートのデータモ
 
 - [AGENTS.md](../../AGENTS.md)（特に「新しいAPIの扱い」「秘密情報」）
 - [DESIGN.md](../DESIGN.md) §4.4（Notes）、§4.7（LLM）、§4.8（Settings）
-- [notes-ops.schema.json](../schemas/notes-ops.schema.json)
+- [notes-ops.schema.json](../../LiveMinutesKit/Sources/LiveMinutesKit/Resources/notes-ops.schema.json)
 
 ## 最初に確認すること
 

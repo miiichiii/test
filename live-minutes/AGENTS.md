@@ -24,8 +24,8 @@
 ```
 project.yml          XcodeGen の定義
 App/                 アプリターゲット（SwiftUIのViewと起動処理だけ）
-LiveMinutesKit/      ローカルSwift Package（UI以外のすべて）とそのテスト
-docs/                設計書、プロンプト、スキーマ、フェーズ別の指示
+LiveMinutesKit/      ローカルSwift Package（UI以外のすべて）とそのテスト。LLMのプロンプトとスキーマは Sources/LiveMinutesKit/Resources/
+docs/                設計書、フェーズ別の指示
 ```
 
 ロジックは `LiveMinutesKit` に置き、`App/` にはViewだけを置く。

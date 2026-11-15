@@ -17,8 +17,7 @@
 | [docs/DESIGN.md](docs/DESIGN.md) | 設計書 |
 | [AGENTS.md](AGENTS.md) | Codexが従うルール（コマンド、規約、禁止事項） |
 | [docs/tasks/](docs/tasks/) | フェーズ別のCodex向け指示（Phase 0〜7） |
-| [docs/prompts/](docs/prompts/) | 整理・要約に使うLLMのシステムプロンプト |
-| [docs/schemas/](docs/schemas/) | ライブ更新の出力スキーマ |
+| [LiveMinutesKit/Sources/LiveMinutesKit/Resources/](LiveMinutesKit/Sources/LiveMinutesKit/Resources/) | 整理・要約に使うLLMのシステムプロンプトと、ライブ更新の出力スキーマ（アプリに同梱するリソース） |
 
 ## 用意するもの
 
