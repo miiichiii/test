@@ -63,13 +63,9 @@ struct LiveNotesInput: Encodable {
 
     init(title: String, glossary: [String], notes: Notes, recentContext: String, segments: [TranscriptSegment]) {
         meeting = Meeting(title: title, glossary: glossary)
-        self.notes = NotesPayload(topics: notes.topics.map { topic in
-            TopicPayload(id: topic.id, title: topic.title, items: topic.items.map { item in
-                ItemPayload(id: item.id, kind: item.kind, text: item.text, owner: item.owner, due: item.due)
-            })
-        })
+        self.notes = NotesPayload(notes)
         self.recentContext = recentContext
-        newTranscript = segments.map { TranscriptLine(t: ElapsedTimeFormat.string($0.start), text: $0.text) }
+        newTranscript = segments.map(TranscriptLine.init)
     }
 
     func jsonString() throws -> String {
@@ -82,5 +78,22 @@ struct LiveNotesInput: Encodable {
         {"meeting":\(try part(meeting)),"notes":\(try part(notes)),\
         "recent_context":\(try part(recentContext)),"new_transcript":\(try part(newTranscript))}
         """
+    }
+}
+
+extension LiveNotesInput.NotesPayload {
+    /// 採番用のカウンタを含めない形にする（議事録の入力でも使う）
+    init(_ notes: Notes) {
+        topics = notes.topics.map { topic in
+            LiveNotesInput.TopicPayload(id: topic.id, title: topic.title, items: topic.items.map { item in
+                LiveNotesInput.ItemPayload(id: item.id, kind: item.kind, text: item.text, owner: item.owner, due: item.due)
+            })
+        }
+    }
+}
+
+extension LiveNotesInput.TranscriptLine {
+    init(_ segment: TranscriptSegment) {
+        self.init(t: ElapsedTimeFormat.string(segment.start), text: segment.text)
     }
 }

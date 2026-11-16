@@ -97,6 +97,9 @@ public final class SessionController {
     public let transcript = TranscriptStore()
     /// ライブ更新のノートと状態
     public let notes = NotesStore()
+    /// 議事録（Phase 5。DESIGN.md §4.6）
+    public let minutes: MinutesStore
+    private let glossary: @MainActor () -> [String]
     /// 入力レベル（0…1）
     public private(set) var inputLevel: Float = 0
 
@@ -153,7 +156,9 @@ public final class SessionController {
         repository: SessionRepository,
         clock: any SessionClock,
         recognitionLocale: @escaping @MainActor () -> Locale = { Locale(identifier: "ja-JP") },
-        notesEngineFactory: (@MainActor (SessionMeta, NotesStore) async -> NotesEngine?)? = nil
+        notesEngineFactory: (@MainActor (SessionMeta, NotesStore) async -> NotesEngine?)? = nil,
+        minutesGenerator: (any MinutesGenerating)? = nil,
+        glossary: @escaping @MainActor () -> [String] = { [] }
     ) {
         self.engine = engine
         self.source = source
@@ -162,6 +167,8 @@ public final class SessionController {
         self.clock = clock
         self.recognitionLocale = recognitionLocale
         self.notesEngineFactory = notesEngineFactory
+        self.minutes = MinutesStore(generator: minutesGenerator, repository: repository)
+        self.glossary = glossary
     }
 
     // MARK: - 画面から読む値
@@ -222,7 +229,8 @@ public final class SessionController {
     /// アプリの終了前に呼ぶ。処理中の操作を待ち、録音中・一時停止中なら停止して保存を終える。
     /// ノートの残りは送らない（終了の上限時間に収めるため）。
     public func finishForTermination() async {
-        // 停止処理がノートの送信を待っている最中でも、すぐに抜けられるようにする。
+        // 停止処理がノートの送信や議事録の生成を待っている最中でも、すぐに抜けられるようにする（議事録は保存しない）。
+        minutes.cancel()
         await notesEngine?.abort()
         while true {
             if let operation {
@@ -235,6 +243,19 @@ public final class SessionController {
             }
             return
         }
+    }
+
+    // MARK: - 議事録
+
+    /// 議事録の生成を止める（停止の後の生成中に、利用者が「中止」を押したとき）。不完全な内容は保存しない
+    public func cancelMinutes() {
+        minutes.cancel()
+    }
+
+    /// 終わった今のセッションの議事録を作り直す。
+    public func regenerateMinutes() async {
+        guard state == .finished, operation == nil, let meta = sessionMeta else { return }
+        await minutes.generate(meta: meta, segments: transcript.segments, notes: notes.notes, glossary: glossary())
     }
 
     // MARK: - ライブ更新
@@ -413,6 +434,7 @@ public final class SessionController {
 
         transcript.reset()
         notes.reset()
+        minutes.reset()
         warning = nil
         sessionMeta = meta
         activeSessionID = meta.id
@@ -512,6 +534,12 @@ public final class SessionController {
             notesEngine = nil
         }
         notes.status = .inactive
+
+        // 議事録（Phase 5）。最終確定 → 残りのライブ更新 → 議事録の順。失敗してもセッションは finished にする
+        // （後から「作り直す」で作れる）。アプリの終了時は作らない。
+        if case .flush = notesMode {
+            await minutes.generate(meta: meta, segments: transcript.segments, notes: notes.notes, glossary: glossary())
+        }
         state = .finished
     }
 

@@ -494,3 +494,92 @@ extension SessionNotesTests {
         await stopping.value
     }
 }
+
+// MARK: - Phase 5（議事録）
+
+extension SessionNotesTests {
+    private func makeMinutesController(engine: ScriptedEngine, root: URL, generator: FakeMinutesGenerator) -> SessionController {
+        SessionController(
+            engine: engine,
+            source: source,
+            permission: FixedPermission(granted: true),
+            repository: SessionRepository(rootDirectory: root),
+            clock: sessionClock,
+            minutesGenerator: generator,
+            glossary: { ["LiveMinutes"] }
+        )
+    }
+
+    @Test("停止すると、保存とノートの後に議事録を作り、その間は確定中。終わったら finished で minutes.md がある")
+    func stopGeneratesMinutes() async throws {
+        let dir = try TemporaryDirectory()
+        defer { dir.remove() }
+        let engine = ScriptedEngine(eventsPerStart: [[.final(segment("金曜に出しましょう"))]])
+        let generator = FakeMinutesGenerator()
+        await generator.set(delay: .milliseconds(50))
+        let controller = makeMinutesController(engine: engine, root: dir.url, generator: generator)
+        let repository = SessionRepository(rootDirectory: dir.url)
+
+        await controller.start()
+        await waitUntil { controller.transcript.segments.count == 1 }
+        let stopping = Task { await controller.stop() }
+        await waitUntil { controller.minutes.isGenerating }
+        #expect(controller.state == .finishing)
+        let id = try #require(controller.sessionMeta?.id)
+        #expect(try await repository.loadMeta(id: id).status == .finished)
+        await stopping.value
+
+        #expect(controller.state == .finished)
+        #expect(controller.minutes.state == .completed)
+        #expect(try await repository.loadMinutes(id: id) == controller.minutes.text)
+        let input = try #require(await generator.inputs.first)
+        #expect(input.contains("金曜に出しましょう"))
+        #expect(input.contains("LiveMinutes"))
+    }
+
+    @Test("議事録の生成に失敗しても finished になり、作り直せる")
+    func minutesFailureStillFinishes() async throws {
+        let dir = try TemporaryDirectory()
+        defer { dir.remove() }
+        let engine = ScriptedEngine(eventsPerStart: [[.final(segment("発言"))]])
+        let generator = FakeMinutesGenerator()
+        await generator.set(failAfter: 0)
+        let controller = makeMinutesController(engine: engine, root: dir.url, generator: generator)
+
+        await controller.start()
+        await waitUntil { controller.transcript.segments.count == 1 }
+        await controller.stop()
+        #expect(controller.state == .finished)
+        if case .failed = controller.minutes.state {} else { Issue.record("失敗を表示する") }
+
+        await generator.set(failAfter: .some(nil))
+        await controller.regenerateMinutes()
+        #expect(controller.minutes.state == .completed)
+    }
+
+    @Test("アプリの終了時は議事録を作らない。議事録の生成中に終了しても、すぐに抜けて保存しない")
+    func terminationSkipsMinutes() async throws {
+        let dir = try TemporaryDirectory()
+        defer { dir.remove() }
+        let engine = ScriptedEngine(eventsPerStart: [[.final(segment("発言"))], [.final(segment("発言2"))]])
+        let generator = FakeMinutesGenerator()
+        let controller = makeMinutesController(engine: engine, root: dir.url, generator: generator)
+        let repository = SessionRepository(rootDirectory: dir.url)
+
+        await controller.start()
+        await waitUntil { controller.transcript.segments.count == 1 }
+        await controller.finishForTermination()
+        #expect(await generator.inputs.isEmpty)
+
+        await generator.set(delay: .seconds(5))
+        await controller.start()
+        await waitUntil { controller.transcript.segments.count == 1 }
+        let stopping = Task { await controller.stop() }
+        await waitUntil { controller.minutes.isGenerating }
+        await controller.finishForTermination()
+        await stopping.value
+        #expect(controller.state == .finished)
+        let id = try #require(controller.sessionMeta?.id)
+        #expect(try await repository.loadMinutes(id: id) == nil)
+    }
+}

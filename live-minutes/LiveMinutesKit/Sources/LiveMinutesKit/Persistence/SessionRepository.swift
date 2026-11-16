@@ -3,8 +3,7 @@ import os
 
 /// セッションの保存（DESIGN.md §4.9）。
 ///
-/// `<rootDirectory>/<セッションID>/` に `meta.json`、`transcript.jsonl`、`notes.json` を置く。
-/// 一覧・削除は Phase 5 で足す。
+/// `<rootDirectory>/<セッションID>/` に `meta.json`、`transcript.jsonl`、`notes.json`、`minutes.md` を置く。
 public actor SessionRepository {
     public enum RepositoryError: Error, Equatable, Sendable {
         /// 書き込み先のファイルを開けない
@@ -19,6 +18,7 @@ public actor SessionRepository {
     static let metaFileName = "meta.json"
     static let transcriptFileName = "transcript.jsonl"
     static let notesFileName = "notes.json"
+    static let minutesFileName = "minutes.md"
 
     /// 既定の保存先。サンドボックス下では
     /// `~/Library/Containers/<バンドルID>/Data/Library/Application Support/LiveMinutes/sessions/` になる。
@@ -79,6 +79,56 @@ public actor SessionRepository {
         let url = directory(for: id).appending(path: Self.notesFileName)
         guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return Notes() }
         return try JSONDecoder().decode(Notes.self, from: Data(contentsOf: url))
+    }
+
+    // MARK: - minutes.md
+
+    /// 議事録をアトミックに書き換える（生成が完了したときだけ）。
+    public func writeMinutes(_ minutes: String, to id: UUID) throws {
+        let url = directory(for: id).appending(path: Self.minutesFileName)
+        try Data(minutes.utf8).write(to: url, options: .atomic)
+    }
+
+    /// 議事録を読む。まだない場合は nil。
+    public func loadMinutes(id: UUID) throws -> String? {
+        let url = directory(for: id).appending(path: Self.minutesFileName)
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return nil }
+        return String(decoding: try Data(contentsOf: url), as: UTF8.self)
+    }
+
+    // MARK: - 一覧と削除
+
+    /// セッションの一覧（新しい順）。`meta.json` を読めないフォルダ（壊れた・途中で作られたもの）は飛ばす。
+    public func listSessions() -> [SessionMeta] {
+        let fileManager = FileManager.default
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        var sessions: [SessionMeta] = []
+        var skipped = 0
+        for entry in entries {
+            guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true,
+                  let id = UUID(uuidString: entry.lastPathComponent) else { continue }
+            if let meta = try? loadMeta(id: id), meta.id == id {
+                sessions.append(meta)
+            } else {
+                skipped += 1
+            }
+        }
+        if skipped > 0 {
+            Self.logger.notice("meta.json を読めないセッションのフォルダを \(skipped) 件飛ばした")
+        }
+        return sessions.sorted { $0.startedAt > $1.startedAt }
+    }
+
+    /// セッションのフォルダごと消す。
+    public func deleteSession(id: UUID) throws {
+        closeTranscript(for: id)
+        let directory = directory(for: id)
+        guard FileManager.default.fileExists(atPath: directory.path(percentEncoded: false)) else { return }
+        try FileManager.default.removeItem(at: directory)
     }
 
     // MARK: - transcript.jsonl

@@ -10,7 +10,7 @@ struct LiveMinutesApp: App {
         // 会議は同時に1つだけ扱うので、複数開ける WindowGroup ではなく単一の Window にする。
         // 単一の Window は閉じるとアプリが終了し、そのときも AppDelegate の終了処理を通る。
         Window("LiveMinutes", id: "main") {
-            MainView(controller: appDelegate.controller, settings: appDelegate.settings)
+            MainView(controller: appDelegate.controller, settings: appDelegate.settings, history: appDelegate.history)
         }
         .defaultSize(width: 960, height: 600)
 
@@ -47,6 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let inputDevices = AudioInputDeviceList()
     /// Whisper（ローカル）のモデルのダウンロードと削除
     let whisperModels: WhisperModelManager
+    /// 過去のセッションの一覧（Phase 5）
+    let history: SessionHistory
 
     /// 最終確定（最大10秒）と保存を待つ上限。超えたら保存を諦めて終了する。
     private static let terminationTimeout: Duration = .seconds(12)
@@ -93,6 +95,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settings = settings
         self.secretStore = secretStore
         self.connectionTest = ConnectionTest(client: llmClient, modelCatalog: { try await llmClient.chatGPTModelSlugs() })
+        // 議事録（Phase 5）。プロンプトを読めなければ作らない（画面に理由を出す）。
+        let minutesWriter: (any MinutesGenerating)? = (try? LLMResources.finalMinutesSystemPrompt()).map { prompt in
+            MinutesWriter(
+                client: llmClient,
+                systemPrompt: prompt,
+                modelSelection: {
+                    NotesEngine.ModelSelection(
+                        model: settings.effectiveFinalModelID,
+                        reasoningEffort: AppSettings.effort(settings.finalReasoningEffort)
+                    )
+                },
+                isConfigured: {
+                    await LiveNotesFactory.isConfigured(settings: settings, secretStore: secretStore, chatGPT: chatGPTAuth)
+                }
+            )
+        }
+        self.history = SessionHistory(repository: repository, minutesGenerator: minutesWriter, glossary: { settings.glossary })
         let controller = SessionController(
             engine: transcriptionEngine,
             source: microphone,
@@ -100,7 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             repository: repository,
             clock: SystemSessionClock(),
             recognitionLocale: { settings.recognitionLocale },
-            notesEngineFactory: { meta, store in await notesFactory.makeEngine(for: meta, store: store) }
+            notesEngineFactory: { meta, store in await notesFactory.makeEngine(for: meta, store: store) },
+            minutesGenerator: minutesWriter,
+            glossary: { settings.glossary }
         )
         self.controller = controller
         self.chatGPTAccount = ChatGPTAccount(
