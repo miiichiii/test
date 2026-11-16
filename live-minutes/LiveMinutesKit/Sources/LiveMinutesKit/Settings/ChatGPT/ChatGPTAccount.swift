@@ -14,6 +14,11 @@ public final class ChatGPTAccount {
     public private(set) var message: Message?
     /// ログアウトの処理中（ボタンを連打して2本走らせない）
     public private(set) var isSigningOut = false
+    /// 「ChatGPT プランを使います」の案内を出すか（プランの利用が初めて許可されたとき。UI/UX guidelines）
+    public private(set) var showsPlanUsageWelcome = false
+
+    static let welcomeShownKey = "LiveMinutes.chatGPTWelcomeShown"
+    @ObservationIgnored private let defaults: UserDefaults
 
     @ObservationIgnored private let auth: ChatGPTAuth
     @ObservationIgnored private let openURL: @MainActor (URL) -> Bool
@@ -23,23 +28,32 @@ public final class ChatGPTAccount {
     /// - Parameters:
     ///   - openURL: 既定のブラウザで URL を開く（App 側で `NSWorkspace` を使う）
     ///   - onCredentialsChange: ログイン・ログアウトしたとき（会議中のライブ更新に知らせる）
+    ///   - defaults: 案内を出したかを覚える。テストでは専用の suite を渡す
     public init(
         auth: ChatGPTAuth,
         openURL: @escaping @MainActor (URL) -> Bool,
-        onCredentialsChange: @escaping @MainActor () -> Void
+        onCredentialsChange: @escaping @MainActor () -> Void,
+        defaults: UserDefaults = .standard
     ) {
         self.auth = auth
         self.openURL = openURL
         self.onCredentialsChange = onCredentialsChange
+        self.defaults = defaults
         let updates = auth.stateUpdates
         observation = Task { [weak self] in
             for await newState in updates {
                 guard let self else { return }
                 let previous = self.state
                 self.state = newState
-                // 更新の失敗でログインし直しが必要になったときも、ライブ更新に知らせる。
-                if case .needsSignIn = newState, previous != newState {
+                // 会議の開始時にキーチェーンを読めなかった（ダイアログを拒否した、など）後で、設定画面で読めた場合は、
+                // ライブ更新に知らせて始められるようにする。
+                if case .signedIn(_, true) = newState, previous == .unknown || previous == .unavailable {
                     self.onCredentialsChange()
+                }
+                // 更新の失敗でログインし直しが必要になったときは知らせない。次の送信が「要ログイン」で止まり、
+                // 案内が出る（ここで知らせると、再試行してすぐ止まる表示の切り替わりが一瞬出るため）。
+                if case .signedIn(_, true) = newState, !self.defaults.bool(forKey: Self.welcomeShownKey) {
+                    self.showsPlanUsageWelcome = true
                 }
             }
         }
@@ -102,5 +116,12 @@ public final class ChatGPTAccount {
 
     public func clearMessage() {
         message = nil
+    }
+
+    /// 「ChatGPT プランを使います」の案内を閉じた。閉じたときに覚える（表示する前に設定画面を閉じた場合に、
+    /// 一度も見ないまま終わらないように）
+    public func acknowledgePlanUsageWelcome() {
+        defaults.set(true, forKey: Self.welcomeShownKey)
+        showsPlanUsageWelcome = false
     }
 }

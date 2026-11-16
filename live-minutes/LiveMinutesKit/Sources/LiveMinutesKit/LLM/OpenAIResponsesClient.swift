@@ -621,7 +621,15 @@ extension LLMError {
 
     /// `status: failed` や error イベントのエラーを対応付ける（ChatGPT のコードを先に見る）。
     static func fromFailure(code: String?, message: String?, param: String?) -> LLMError {
-        chatGPTPlanError(code: code, message: message, param: param) ?? .failed(code: code, message: message)
+        if let mapped = chatGPTPlanError(code: code, message: message, param: param) { return mapped }
+        if code == "insufficient_quota" { return .quotaExceeded }
+        return .failed(code: code, message: message)
+    }
+
+    /// `failed` のうち、時間をおけば直る見込みのあるコード。公式 Python SDK の `ResponseError.code` の列挙にあるもののうち、
+    /// 一時的と言えるのはこの2つだけ（ほかのコードは推測で足さない。DESIGN.md §4.11）
+    static func isTransientFailureCode(_ code: String?) -> Bool {
+        code == "server_error" || code == "rate_limit_exceeded"
     }
 }
 

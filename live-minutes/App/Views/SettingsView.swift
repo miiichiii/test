@@ -82,6 +82,18 @@ struct SettingsView: View {
         }
         // ログイン・ログアウトしたら、前の接続テストの結果を消す。
         .onChange(of: chatGPTAccount.state) { connectionTest.reset() }
+        // プランの利用が初めて許可されたときの案内（UI/UX guidelines の「You're using your ChatGPT plan」）。
+        .alert(
+            "ChatGPT プランを使います",
+            isPresented: Binding(
+                get: { chatGPTAccount.showsPlanUsageWelcome },
+                set: { if !$0 { chatGPTAccount.acknowledgePlanUsageWelcome() } }
+            )
+        ) {
+            Button("OK") { chatGPTAccount.acknowledgePlanUsageWelcome() }
+        } message: {
+            Text("このアプリでの AI へのリクエストには、あなたの ChatGPT のプランの利用枠を使います（API キーの料金とは別です）。使用量は ChatGPT の設定（使用量）で確かめたり、上限を決めたりできます。")
+        }
         // 保存しなかったキーを入力欄（メモリ）に残さない。
         .onDisappear { apiKeyInput = "" }
         .task {

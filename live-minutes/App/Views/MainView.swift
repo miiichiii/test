@@ -4,13 +4,14 @@ import SwiftUI
 /// メイン画面。左に文字起こし、右にノートを並べる。
 struct MainView: View {
     let controller: SessionController
+    let settings: AppSettings
     @State private var isStartSheetPresented = false
 
     var body: some View {
         HSplitView {
             TranscriptPane(controller: controller)
                 .paneFrame()
-            NotesPane(controller: controller)
+            NotesPane(controller: controller, authMethod: settings.authMethod)
                 .paneFrame()
         }
         .frame(minHeight: 320)

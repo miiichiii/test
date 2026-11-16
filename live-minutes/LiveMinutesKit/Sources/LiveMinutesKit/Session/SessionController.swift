@@ -132,6 +132,17 @@ public final class SessionController {
     private var notesEngine: NotesEngine?
     /// 一時停止トグルの変更をエンジンへ順に伝える
     private var notesPauseTask: Task<Void, Never>?
+    /// ライブ更新のエンジンを作っている処理（キーチェーンの許可ダイアログを待つことがあるので、会議の開始とは別に走らせる）
+    private var notesAttachTask: Task<Void, Never>?
+    /// エンジンを作っているセッション（付けた直後に、ためた発言を渡し終えるまでを含む）。
+    /// セッションで見分けるのは、前の会議のエンジン作りが終わる前に次の会議を始めても取り違えないため
+    private var attachingSessionID: UUID?
+    /// エンジンを作っている間に確定した発言。付けたら順に渡す（ダイアログの間の発言もノートに入れるため）
+    private var notesBuffer: [TranscriptSegment] = []
+    /// エンジンを作っている間に資格情報が変わった。作れなかったら、もう一度試す
+    private var notesReattachRequested = false
+    /// 一時停止トグルをオンにするたびに進める。ためた発言を渡している途中でオンになったら、残りを渡さないため
+    private var notesPauseGeneration = 0
 
     private static let logger = Logger(subsystem: LiveMinutesInfo.logSubsystem, category: "Session")
 
@@ -233,6 +244,11 @@ public final class SessionController {
     public func setNotesSendingPaused(_ paused: Bool) {
         guard notes.isSendingPaused != paused else { return }
         notes.isSendingPaused = paused
+        // まだエンジンに渡していない発言も、オンにした時点で捨てる。
+        if paused {
+            notesBuffer.removeAll()
+            notesPauseGeneration += 1
+        }
         guard let engine = notesEngine else { return }
         // 切り替えの順序を保つため、前の変更を待ってから伝える。
         let previous = notesPauseTask
@@ -250,38 +266,85 @@ public final class SessionController {
 
     /// 資格情報が変わったとき（API キーの保存・削除、ChatGPT のログイン・ログアウト、接続方法の変更）に呼ぶ。
     /// 止まっていた送信を再開し、会議中に設定されたらその時点からライブ更新を始める。
+    ///
+    /// エンジンを作っている途中なら、終わったらもう一度試すよう頼むだけで、待たずに戻る。
+    /// そうでなければ、エンジンを作り終えるまで待つ。
     public func credentialsDidChange() async {
         if let engine = notesEngine {
             await engine.retryNow()
             return
         }
         guard activeSessionID != nil, let meta = sessionMeta else { return }
-        await attachNotesEngine(for: meta)
+        if attachingSessionID == meta.id {
+            notesReattachRequested = true
+            return
+        }
+        startAttachingNotesEngine(for: meta)
+        await notesAttachTask?.value
     }
 
-    /// ライブ更新のエンジンを作って付ける。作れなければ（API キーなし）その旨を表示する。
+    /// ライブ更新のエンジンを、会議の開始とは別の Task で作り始める（DESIGN.md §4.10）。
+    ///
+    /// ChatGPT のプランでは「設定済みか」を確かめるときにキーチェーンを読むので、許可ダイアログが出うる。
+    /// その間も録音と文字起こしは進め、確定した発言はためておいて、付けたときに順に渡す。
+    private func startAttachingNotesEngine(for meta: SessionMeta) {
+        guard attachingSessionID != meta.id else {
+            notesReattachRequested = true
+            return
+        }
+        attachingSessionID = meta.id
+        notesBuffer.removeAll()
+        notesReattachRequested = false
+        notesAttachTask = Task { [weak self] in
+            await self?.attachNotesEngine(for: meta)
+        }
+    }
+
+    /// ライブ更新のエンジンを作って付ける。作れなければ（未設定）その旨を表示する。
     private func attachNotesEngine(for meta: SessionMeta) async {
-        guard let factory = notesEngineFactory else {
-            notes.status = .notConfigured
-            return
+        defer {
+            // 次の会議のエンジン作りが始まっていたら、そちらの状態には触れない。
+            if attachingSessionID == meta.id {
+                notesBuffer.removeAll()
+                attachingSessionID = nil
+                notesAttachTask = nil
+            }
         }
-        let engine = await factory(meta, notes)
-        // 待っている間にセッションが終わった、または別の経路でエンジンができた場合は使わない。
-        guard activeSessionID == meta.id, notesEngine == nil else {
-            await engine?.abort()
+        while true {
+            notesReattachRequested = false
+            let engine = await notesEngineFactory?(meta, notes)
+            // 待っている間にセッションが終わった、または別の経路でエンジンができた場合は使わない。
+            guard activeSessionID == meta.id, notesEngine == nil else {
+                await engine?.abort()
+                return
+            }
+            guard let engine else {
+                notes.status = .notConfigured
+                // 作っている間に資格情報が変わっていたら、もう一度試す。
+                if notesReattachRequested { continue }
+                return
+            }
+            notesEngine = engine
+            // 待っている間に一時停止トグルがオンになっていたら、エンジンにも伝える。
+            if notes.isSendingPaused {
+                notes.status = .paused
+                notesBuffer.removeAll()
+                await engine.setPaused(true)
+            } else {
+                notes.status = .waiting
+            }
+            // ためた発言を順に渡す。渡している間に届いた発言もためるので、空になるまで繰り返す。
+            // 途中で一時停止トグルがオンになったら、残りは渡さない（オンにした時点でまだ送っていない発言は捨てる）。
+            let pauseGeneration = notesPauseGeneration
+            flush: while !notesBuffer.isEmpty {
+                let buffered = notesBuffer
+                notesBuffer.removeAll()
+                for segment in buffered {
+                    guard notesPauseGeneration == pauseGeneration else { break flush }
+                    await engine.add(segment)
+                }
+            }
             return
-        }
-        guard let engine else {
-            notes.status = .notConfigured
-            return
-        }
-        notesEngine = engine
-        // 待っている間に一時停止トグルがオンになっていたら、エンジンにも伝える。
-        if notes.isSendingPaused {
-            notes.status = .paused
-            await engine.setPaused(true)
-        } else {
-            notes.status = .waiting
         }
     }
 
@@ -353,14 +416,14 @@ public final class SessionController {
         warning = nil
         sessionMeta = meta
         activeSessionID = meta.id
-        // API キーがなければライブ更新は動かさず、文字起こしだけを続ける。
-        await attachNotesEngine(for: meta)
         accumulated = 0
         lastFinalEnd = 0
         runStartedAt = clock.uptime()
         expectingStreamEnd = false
         state = .recording
         eventsTask = makeEventsTask(events, offset: 0, sessionID: meta.id)
+        // 未設定ならライブ更新は動かさず、文字起こしだけを続ける。会議の開始を待たせないよう、別の Task で作る。
+        startAttachingNotesEngine(for: meta)
     }
 
     private func runPause() async {
@@ -433,6 +496,15 @@ public final class SessionController {
         await repository.closeTranscript(for: meta.id)
         sessionMeta = meta
 
+        // ためた発言をエンジンに渡している途中なら、渡し終えるまで待つ（actor への数回の呼び出しなので短い）。
+        // エンジンを作っている途中（キーチェーンのダイアログ待ちなど）なら、待たずに打ち切る
+        // （作り終えたエンジンは、セッションが変わったので捨てられる）。
+        if notesEngine != nil, attachingSessionID == meta.id {
+            await notesAttachTask?.value
+        }
+        attachingSessionID = nil
+        notesBuffer.removeAll()
+        notesAttachTask = nil
         await notesPauseTask?.value
         notesPauseTask = nil
         if let engine = notesEngine {
@@ -488,8 +560,12 @@ public final class SessionController {
                 warning = .transcriptNotSaved
             }
         }
-        if sendToNotes, let engine = notesEngine {
-            await engine.add(shifted)
+        if sendToNotes {
+            if attachingSessionID == sessionID {
+                notesBuffer.append(shifted)
+            } else if let engine = notesEngine {
+                await engine.add(shifted)
+            }
         }
     }
 
@@ -544,6 +620,14 @@ public final class SessionController {
     func waitForNotesPauseChange() async {
         await notesPauseTask?.value
     }
+
+    /// ライブ更新のエンジンを作り終えるまで待つ。
+    func waitForNotesAttach() async {
+        await notesAttachTask?.value
+    }
+
+    /// エンジンを作っている間にためている発言の数
+    var notesBufferCount: Int { notesBuffer.count }
 
     /// イベントの読み取りと、それに続く処理（認識の失敗による終了など）が終わるまで待つ。
     /// 録音中にストリームが終わらない場合は戻らないので、ストリームを終わらせてから呼ぶ。

@@ -13,8 +13,30 @@ public enum LiveNotesStatus: Equatable, Sendable {
     case updating
     /// 「要約の送信を一時停止」がオン
     case paused
-    /// 失敗した。`needsRetry` が true なら自動では送り直さない（「再試行」か API キーの保存で再開する）
-    case failed(message: String, needsRetry: Bool)
+    /// 失敗した。`needsRetry` が true なら自動では送り直さない（「再試行」か資格情報の変更で再開する）。
+    /// `action` は案内に出す次の操作
+    case failed(message: String, needsRetry: Bool, action: NotesFailureAction = .checkSettings)
+}
+
+/// 失敗の案内に出す次の操作（DESIGN.md §4.11・§5）。
+public enum NotesFailureAction: Equatable, Sendable {
+    /// 設定を確かめる（API キー、モデルIDなど）
+    case checkSettings
+    /// ChatGPT の使用量を確かめる（使用量の上限）
+    case manageUsage
+    /// 設定画面で ChatGPT にログインし直す
+    case signIn
+
+    init(_ error: (any Error)?) {
+        switch error as? LLMError {
+        case .usageLimitReached?:
+            self = .manageUsage
+        case .chatGPTSignInRequired?, .chatGPTUnauthorized?, .chatGPTPlanNotGranted?, .chatGPTCredentialUnavailable?:
+            self = .signIn
+        default:
+            self = .checkSettings
+        }
+    }
 }
 
 /// 確定セグメントをためて LLM（Luna）に送り、返ってきた差分をノートに適用する（DESIGN.md §4.5）。
@@ -112,6 +134,10 @@ public actor NotesEngine {
     private(set) var isHalted = false
     /// 止まった理由（画面に出す。止まっている間は一時停止をオン・オフしても、この表示に戻す）
     private var haltMessage: String?
+    /// 止まったときの案内の操作
+    private var haltAction: NotesFailureAction = .checkSettings
+    /// `retryNow` のたびに進める。送信中に資格情報が変わった（接続方法の切り替えなど）ことを見分けるため
+    private var retryGeneration = 0
     private var contentFailures = 0
     private(set) var isPaused = false
     private var isFinishing = false
@@ -187,8 +213,10 @@ public actor NotesEngine {
         let wasWaitingForRetry = isHalted || retryNotBefore != nil
         isHalted = false
         haltMessage = nil
+        haltAction = .checkSettings
         retryNotBefore = nil
         contentFailures = 0
+        retryGeneration += 1
         guard inFlight == nil else { return }
         if pending.isEmpty || isPaused || !wasWaitingForRetry {
             await report(.status(idleStatus))
@@ -353,6 +381,7 @@ public actor NotesEngine {
             return finishSend()
         }
         let batch = makeBatch()
+        let sendRetryGeneration = retryGeneration
         do {
             let input = try LiveNotesInput(
                 title: configuration.meetingTitle,
@@ -394,7 +423,7 @@ public actor NotesEngine {
             // 終了による打ち切り。失敗として扱わない。
         } catch {
             guard !isClosed, !Task.isCancelled else { return finishSend() }
-            await handleFailure(error, batch: batch)
+            await handleFailure(error, batch: batch, retriedDuringSend: retryGeneration != sendRetryGeneration)
         }
         finishSend()
     }
@@ -413,7 +442,9 @@ public actor NotesEngine {
         evaluate()
     }
 
-    private func handleFailure(_ error: any Error, batch: [TranscriptSegment]) async {
+    /// - Parameter retriedDuringSend: 送信中に「再試行」か資格情報の変更があった。古い資格情報で送ったリクエストの
+    ///   失敗で止めないよう、直らない失敗でも止めずに1回だけ送り直す
+    private func handleFailure(_ error: any Error, batch: [TranscriptSegment], retriedDuringSend: Bool = false) async {
         let now = clock.now()
         lastCompletedAt = now
         let llmError = error as? LLMError
@@ -421,10 +452,16 @@ public actor NotesEngine {
         let message = (error as? LocalizedError)?.errorDescription ?? "ノートを更新できませんでした。"
 
         switch FailureKind(error) {
+        case .permanent where retriedDuringSend:
+            // 送信中に接続方法が変わった、などの場合は、新しい資格情報でもう1回だけ試す。
+            retryNotBefore = nil
+            Self.logger.notice("送信中に再試行が求められたため、止めずに送り直す: \(summary, privacy: .public)")
+            await report(.status(idleStatus))
         case .permanent:
             // キーやモデルIDの誤りなど。送り続けても直らないので止める。
             isHalted = true
             haltMessage = message
+            haltAction = NotesFailureAction(error)
             Self.logger.error("ノートの更新を止める: \(summary, privacy: .public)")
             await report(.status(idleStatus))
         case .content:
@@ -464,6 +501,9 @@ public actor NotesEngine {
                 switch error {
                 case .missingAPIKey, .apiKeyUnavailable, .authentication, .permissionDenied, .quotaExceeded, .badRequest:
                     self = .permanent
+                case .failed(let code, _) where LLMError.isTransientFailureCode(code):
+                    // ストリームの途中の response.failed などで届くサーバー側の一時的な失敗。発言を捨てない。
+                    self = .transient
                 case .refusal, .incomplete, .invalidOutput, .failed:
                     self = .content
                 case .network, .timeout, .rateLimited, .server, .planUsageUnavailable:
@@ -484,7 +524,7 @@ public actor NotesEngine {
     /// 送信していない間の状態（優先順: 一時停止中 → 止まっている → 待機）
     private var idleStatus: LiveNotesStatus {
         if isPaused { return .paused }
-        if isHalted { return .failed(message: haltMessage ?? "ノートを更新できませんでした。", needsRetry: true) }
+        if isHalted { return .failed(message: haltMessage ?? "ノートを更新できませんでした。", needsRetry: true, action: haltAction) }
         return .waiting
     }
 

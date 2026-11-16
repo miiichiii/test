@@ -10,7 +10,7 @@ struct LiveMinutesApp: App {
         // 会議は同時に1つだけ扱うので、複数開ける WindowGroup ではなく単一の Window にする。
         // 単一の Window は閉じるとアプリが終了し、そのときも AppDelegate の終了処理を通る。
         Window("LiveMinutes", id: "main") {
-            MainView(controller: appDelegate.controller)
+            MainView(controller: appDelegate.controller, settings: appDelegate.settings)
         }
         .defaultSize(width: 960, height: 600)
 
@@ -61,7 +61,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let repository = SessionRepository(rootDirectory: SessionRepository.defaultRootDirectory)
         let notesFactory = LiveNotesFactory(
             settings: settings,
-            secretStore: secretStore,
+            isConfigured: {
+                await LiveNotesFactory.isConfigured(settings: settings, secretStore: secretStore, chatGPT: chatGPTAuth)
+            },
             client: llmClient,
             repository: repository
         )

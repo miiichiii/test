@@ -232,7 +232,7 @@ extension LLMError: LocalizedError {
         case .planUsageUnavailable:
             "ChatGPT のプランの使用量を確認できませんでした。しばらく待ってから試してください。"
         case .planNotEligible(let message):
-            withDetail("この ChatGPT のアカウントでは、プランの利用枠を使えません。", message)
+            withDetail("この ChatGPT のアカウントでは、プランの利用枠を使えません。設定画面で接続方法を API キーに切り替えられます。", message)
         case .unsupportedCapability(let param):
             withDetail("ChatGPT のプランの利用枠では使えない指定が含まれていました。", param)
         }

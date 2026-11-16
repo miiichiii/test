@@ -170,16 +170,19 @@ struct NotesEngineTests {
         #expect(await engine.isHalted == false)
     }
 
-    @Test("ChatGPT のプランのエラー: 使用量の上限や要ログインは止め、使用量を確かめられないだけなら送り直す", arguments: [
-        (LLMError.usageLimitReached, true),
-        (.chatGPTSignInRequired, true),
-        (.chatGPTPlanNotGranted, true),
-        (.planNotEligible(message: nil), true),
-        (.unsupportedCapability(param: "text"), true),
-        (.chatGPTUnauthorized, true),
-        (.planUsageUnavailable, false),
+    @Test("ChatGPT のプランのエラー: 使用量の上限や要ログインは止め、使用量を確かめられないだけなら送り直す。案内の操作も決める", arguments: [
+        (LLMError.usageLimitReached, true, NotesFailureAction.manageUsage),
+        (.chatGPTSignInRequired, true, .signIn),
+        (.chatGPTPlanNotGranted, true, .signIn),
+        (.chatGPTCredentialUnavailable, true, .signIn),
+        (.planNotEligible(message: nil), true, .checkSettings),
+        (.unsupportedCapability(param: "text"), true, .checkSettings),
+        (.chatGPTUnauthorized, true, .signIn),
+        (.planUsageUnavailable, false, .checkSettings),
+        (.failed(code: "server_error", message: nil), false, .checkSettings),
+        (.failed(code: "rate_limit_exceeded", message: nil), false, .checkSettings),
     ])
-    func chatGPTPlanFailureKinds(error: LLMError, halts: Bool) async throws {
+    func chatGPTPlanFailureKinds(error: LLMError, halts: Bool, action: NotesFailureAction) async throws {
         let engine = try makeEngine()
         await engine.add(segment(characters: 130))
         clock.advance(by: 8)
@@ -188,7 +191,7 @@ struct NotesEngineTests {
         await waitUntil { await !engine.isInFlight }
 
         #expect(await engine.isHalted == halts)
-        #expect(store.status == .failed(message: error.localizedDescription, needsRetry: halts))
+        #expect(store.status == .failed(message: error.localizedDescription, needsRetry: halts, action: halts ? action : .checkSettings))
         // どちらの場合も、発言は捨てない。
         #expect(await engine.pending.count == 1)
     }
