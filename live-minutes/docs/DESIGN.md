@@ -151,6 +151,21 @@ Phase 7 でシステム音声用の実装を足せるよう、文字起こし側
 
 タイムスタンプは「投入した音声の累積時間」が基準になる（`AnalyzerInput` に `bufferStartTime` は渡さない）。`start` のたびに `SpeechAnalyzer` を作り直すので、時刻は `start` ごとに0から始まる。入力デバイスの切り替え中は音声を流さないので、壁時計の時刻とはわずかにずれる。表示用の時刻は会議開始からの録音経過時間として扱い、一時停止をまたぐ分のずらしは `SessionController` が行う（§4.10）。
 
+#### Whisper（ローカル）での書き起こし（Phase 4D）
+
+Apple の音声認識に加えて、OpenAI の Whisper のモデルを Mac の中で動かす書き起こしを選べるようにする（両方を試して比べるため）。音声は外に出さない。
+
+- **外部ライブラリ**: Argmax OSS（旧 WhisperKit。`https://github.com/argmaxinc/argmax-oss-swift.git`、product は `WhisperKit`、MIT。一部は NOTICES のとおり元のライセンス）を `LiveMinutesKit` の `Package.swift` に足す。利用者が 2026-11-16 に了承した（AGENTS.md の「外部ライブラリは追加しない」の例外。ほかのライブラリは足さない）。実装の最初に、その時点の最新のリリースの版を固定し（`exact:`）、LICENSE と NOTICES を読んで報告する。API の名前は、取得したパッケージのソースで確かめてから使う（記憶や README の例に頼らない）
+- **差し替え**: `TranscriptionEngine` の2つめの実装 `WhisperLocalEngine` を作る。`SessionController` などは `TranscriptionEngine` だけに依存しているので、ほかは変えない。WhisperKit の型は `WhisperLocalEngine` の中に閉じ込め、書き起こしの呼び出しは小さな protocol（`WhisperTranscriber`）の向こうに置く（テストで偽物に差し替えるため）
+- **設定**: `AppSettings` に書き起こしの方式（`apple` 既定 / `whisperLocal`）と Whisper のモデル（既定は精度重視の `large-v3-v20240930_626MB`。速さ重視の `large-v3-v20240930_turbo`、軽い `small` / `base` も選べる。名前はパッケージと Hugging Face の `argmaxinc/whisperkit-coreml` で確かめる）。次に開始する会議から反映する
+- **モデルの用意**: 設定画面の「モデルをダウンロード」で、利用者が押したときだけダウンロードする（大きさを先に表示し、進み具合を出し、キャンセルできる）。保存先はアプリのコンテナの `Application Support/LiveMinutes/models/`。会議の開始時に黙ってダウンロードしない。モデルがないまま Whisper で会議を始めようとしたら、開始せずに「設定画面でモデルをダウンロードしてください」と出す（黙って Apple の音声認識に切り替えない）。削除のボタンも置く。ダウンロードには既存の `network.client` を使う。送るのはモデルの取得の要求だけで、音声は送らない
+- **準備（`prepare(locale:progress:)`）**: モデルを読み込む。初回は Core ML のコンパイルで数分かかることがあるので、進み具合を「準備中」に出す。言語は認識言語（`ja-JP` など）から Whisper の言語コード（`ja`）にする
+- **区切り方**: 無料版にはリアルタイムの高度な処理がないので、自前で音声を区切る。`AudioSource` から 16kHz・モノラル・Float32 で受け取り、無音（エネルギーがしきい値を下回る時間が約0.6秒続く）か、長さの上限（約15秒）で区切って、区切りごとに書き起こし、確定セグメント（`.final`）として流す。時刻は、流し込んだ音声の累積時間を基準にする（Apple の音声認識と同じ。§4.2）
+- **途中結果**: 区切りの途中は、約2秒ごとにその区切りの先頭から今までを書き起こし直して、未確定（`.volatile`）として出す。間に合わない場合（書き起こしが実時間より遅い）は途中結果を飛ばし、確定を優先する
+- **停止**: `stop()` で、残りの音声を最後の区切りとして書き起こしてから、ストリームを終える（Apple の音声認識の最終確定と同じ扱い）
+- **失敗**: モデルの読み込みの失敗、メモリ不足などは、`TranscriptionError` に足して日本語で出す
+- **テスト**: 区切り方（無音と長さの上限、端の扱い）は合成した音声で確かめる純粋なロジックにする。エンジンは偽の `WhisperTranscriber` で確かめる。自動テストではモデルをダウンロードしない
+
 ### 4.3 Transcript
 
 - `TranscriptStore`（`@MainActor`、`@Observable`）: 確定セグメントの配列と、現在の未確定テキストを持つ。`apply(_:)` で未確定は置き換え、確定は追加して未確定を消す。未確定テキストは頻繁に変わるので、確定セグメントとは別のプロパティにし、未確定の更新で一覧全体を再描画させない。時刻は録音経過時間に直したものを入れる
@@ -640,3 +655,4 @@ API キーでの接続テスト（§8 #5）を先に済ませておくと、Chat
 | 11 | 「使用量を管理」のリンク先（ChatGPT の設定の使用量の画面）の URL | Phase 4B | 文書で確認（2026-11-16、UI/UX guidelines）。`https://chatgpt.com/settings/usage`。実際にその画面が開くかは、人による確認で見る |
 | 12 | 初回のログイン（動的登録）で `redirect_uri` のポートを固定する必要があるか。文書には「2回目以降は変わってよい」とだけある | Phase 4B | 未確認（原文は「from initial registration onward」「Later sign-ins may use another available port」）。1455 が使用中のときの初回のログインで確かめる |
 | 13 | `inputNode.auAudioUnit.setDeviceID(_:)` で、`AVAudioEngine` の入力だけを既定と別のマイクにできるか（出力側の装置との組み合わせで失敗しないか）。`setDeviceID` 自体が `AVAudioEngineConfigurationChange` を出すか。選んだ装置の抜き差しで通知が来るか。マイクの許可の前でも一覧を取れるか | Phase 4C | 未確認。ヘッダで API があることは確かめた。実機で確かめる。`setDeviceID` で駄目なら `kAudioOutputUnitProperty_CurrentDevice` を試す |
+| 14 | Whisper（ローカル）の日本語の会議での精度と遅れ、モデルの読み込みの時間、メモリの使用量。Argmax OSS の API の名前と、モデルのダウンロードの仕組み | Phase 4D | 未確認。API はパッケージのソースで確かめる。精度と遅れは実機で、Apple の音声認識と比べて確かめる |

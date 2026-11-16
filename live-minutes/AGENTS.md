@@ -61,6 +61,7 @@ cd LiveMinutesKit && swift test
 - Swift 6 の厳格な並行性チェックを通す。`@unchecked Sendable` や `nonisolated(unsafe)` を使う場合は、安全である理由をコメントに書く
 - 非同期処理は async/await と actor で書く
 - 外部ライブラリは追加しない。必要だと考えた場合は、追加せずに理由を報告する
+  - 例外: Argmax OSS（旧 WhisperKit。Phase 4D のローカルの Whisper のため）は、利用者が 2026-11-16 に了承した。版は固定する
 - 強制アンラップ（`!`）と `try!` は、テストコード以外では使わない
 - テストは Swift Testing（`import Testing`）で書く
 - 画面に出す文言は日本語にする
