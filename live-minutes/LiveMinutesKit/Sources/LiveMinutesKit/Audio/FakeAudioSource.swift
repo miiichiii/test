@@ -47,6 +47,11 @@ public actor FakeAudioSource: AudioSource {
         continuation = nil
         levelContinuation.yield(0)
     }
+
+    /// 開始した後に、バッファを1つ流す（開始中でなければ何もしない）
+    public func push(_ chunk: AudioChunk) {
+        continuation?.yield(chunk)
+    }
 }
 
 /// テスト用の音声バッファを作る。

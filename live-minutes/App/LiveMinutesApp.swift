@@ -125,7 +125,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.history = SessionHistory(repository: repository, minutesGenerator: minutesWriter, glossary: { settings.glossary })
         let controller = SessionController(
             engine: transcriptionEngine,
-            source: microphone,
+            // マイクと Mac 内の音声を混ぜる（Phase 7）。取り込みがオフなら、マイクをそのまま使う。
+            source: MixedAudioSource(
+                microphone: microphone,
+                system: SystemAudioSource(),
+                isSystemAudioEnabled: { settings.captureSystemAudio }
+            ),
             permission: SystemMicrophonePermission(),
             repository: repository,
             clock: SystemSessionClock(),

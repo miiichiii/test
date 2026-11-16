@@ -20,10 +20,12 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
-	<key>NSPrincipalClass</key>
-	<string>NSApplication</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>オンライン会議の相手の声など、Mac から出る音を文字起こしするために使います。音声は Mac の中で処理し、保存も送信もしません。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>会議の音声を文字に起こすために、マイクを使います。音声はこのMacの中だけで処理し、保存も送信もしません。</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>会議の音声を文字に起こすために、音声認識を使います。認識はこのMacの中で行います。</string>
 </dict>

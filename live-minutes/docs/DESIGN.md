@@ -6,7 +6,7 @@
 - 言語/UI: Swift 6、SwiftUI
 - 文字起こし: 端末内（Apple の `SpeechAnalyzer` / `SpeechTranscriber`）
 - 整理・要約: OpenAI API。会議中の更新は Luna、終了時の議事録仕上げは Sol。API キーか、ChatGPT のプランでのログインで使う（ログインは [Phase 4B](tasks/phase-4b-chatgpt-sign-in.md)）
-- 音声ソース: v1 はマイクのみ。Mac内の音声の取り込みは [Phase 7](tasks/phase-7-system-audio.md)
+- 音声ソース: マイク。Phase 7 から、Mac 内の音声（オンライン会議の相手の声など）もマイクと混ぜて取り込める（[Phase 7](tasks/phase-7-system-audio.md)）
 
 ## 1. やること・やらないこと
 
@@ -150,6 +150,18 @@ Phase 7 でシステム音声用の実装を足せるよう、文字起こし側
 結果のストリームは、停止操作によらずに終わった場合（エラーの有無とも）も必ずエンジンに知らせ、ソースを止めてからイベントのストリームをエラーで終える。開始処理の途中で終わった場合は、開始そのものを失敗にする。
 
 タイムスタンプは「投入した音声の累積時間」が基準になる（`AnalyzerInput` に `bufferStartTime` は渡さない）。`start` のたびに `SpeechAnalyzer` を作り直すので、時刻は `start` ごとに0から始まる。入力デバイスの切り替え中は音声を流さないので、壁時計の時刻とはわずかにずれる。表示用の時刻は会議開始からの録音経過時間として扱い、一時停止をまたぐ分のずらしは `SessionController` が行う（§4.10）。
+
+#### Mac 内の音声の取り込み（Phase 7、2026-11-17）
+
+利用者と決めた方式: マイクと Mac 内の音声を**混ぜて1本の音声**にし、今までどおり1つの書き起こし（Apple / Whisper）で文字にする。話者（自分 / 相手）は分けない。指示書の「話者の区分」は、利用者が混ぜる形を選んだため行わない（必要になったら、2系統を別々に文字にして時刻順に並べる形で足す）。
+
+- **取り込み**: `SystemAudioSource`（`AudioSource` の実装）。Core Audio のプロセス tap を `CATapDescription(stereoGlobalTapButExcludeProcesses:)` で作る（LiveMinutes 自身を除く全体。`isPrivate = true`、`muteBehavior = .unmuted` で出力の音は消さない）。tap だけを入れた非公開の集約デバイス（`kAudioAggregateDeviceTapListKey`、`kAudioAggregateDeviceTapAutoStartKey`）を作り、`AudioDeviceCreateIOProcIDWithBlock` の直列キューで受ける。IOProc では変換とストリームへの受け渡しだけを行う。止めるときは IOProc・集約デバイス・tap の順に壊す
+- **許可**: Info.plist の `NSAudioCaptureUsageDescription`。初めて録音を始めたときに「システムオーディオ録音のみ」の許可を求められる。拒否されたら無音が届くので、結果としてマイクだけで文字起こしが続く
+- **混ぜ方**: `MixedAudioSource`。両方を 32 ビット浮動小数点・モノラル（求められたレート）で受け、マイクを時計にして、マイクの音が届いたらその長さの分だけためた Mac 内の音声を足す（-1…1 に収める）。Mac 内の音声が足りない分は足さない。ためる量は最大1秒で、超えたら古いものを捨てる。混ぜた後に、書き起こしが求める形式に変換する。入力レベルはマイクのもの
+- **オフのとき**: 設定の「Mac 内の音声も取り込む」がオフ（既定）なら、マイクのストリームをそのまま渡す（Phase 6 までと同じ動作。受け入れ条件）。開始のたびに設定を読む
+- **始められないとき**: tap や集約デバイスを作れない場合は、ログに残してマイクだけで続ける
+- **二重になる問題**: スピーカーから音を出すと、相手の声がマイクにも入り、Mac 内の音声と重なる（同じ声が少しずれて2回入るので、認識が乱れうる）。イヤホンで使うことを前提にし、設定画面に書く
+- ライブ更新と議事録の入力は変えない（話者を分けないため）
 
 #### Whisper（ローカル）での書き起こし（Phase 4D）
 
@@ -645,7 +657,7 @@ Phase 6 の画面（2026-11-17）:
 
 ## 6. プライバシーと障害時の動作
 
-- 音声は端末内で処理し、保存も送信もしない
+- 音声は端末内で処理し、保存も送信もしない（Phase 7 の Mac 内の音声も同じ）
 - OpenAIに送るのは確定済みのテキスト、ノート、会議名、glossary
 - 「要約の送信を一時停止」中のテキストは送らない（§4.5）
 - 資格情報が未設定（API キーがない、ChatGPT に未ログイン）、またはネットワークがない場合でも、文字起こしだけで動く。ノートペインには理由を表示する
@@ -656,7 +668,7 @@ Phase 6 の画面（2026-11-17）:
 - Xcode 26 以降、Swift 6（厳格な並行性チェックを有効にする）
 - `Package.swift` と `project.yml` のデプロイメントターゲットは macOS 26
 - 署名はローカル実行用（Sign to Run Locally）。`project.yml` では `CODE_SIGN_IDENTITY: "-"`、チームなしで表す
-- `Info.plist`: `NSMicrophoneUsageDescription`、`NSSpeechRecognitionUsageDescription`。手書きのファイル（`App/Info.plist`）を `INFOPLIST_FILE` で参照する。XcodeGen の `info:` / `entitlements:` キーは、生成のたびにファイルを書き出すので使わない
+- `Info.plist`: `NSMicrophoneUsageDescription`、`NSSpeechRecognitionUsageDescription`、`NSAudioCaptureUsageDescription`（Phase 7。Mac 内の音声の取り込み）。手書きのファイル（`App/Info.plist`）を `INFOPLIST_FILE` で参照する。XcodeGen の `info:` / `entitlements:` キーは、生成のたびにファイルを書き出すので使わない
 - entitlements: `com.apple.security.app-sandbox`、`com.apple.security.device.audio-input`、`com.apple.security.network.client`、`com.apple.security.files.user-selected.read-write`（Phase 2 の書き出しで、利用者が選んだ場所に保存するため）、`com.apple.security.network.server`（Phase 4B の ChatGPT ログインで、`127.0.0.1` でコールバックを待ち受けるため）
 - ウィンドウは1つだけ（`WindowGroup` ではなく `Window`）。会議は同時に1つしか扱わないため。単一の `Window` は、閉じるとアプリが終了する。録音中に閉じた（終了した）ときは、停止して保存を終えてから終了する（§4.10）。メニューバー常駐との両立は Phase 6 で決めた: ウィンドウとメニューバーの両方を置く。ウィンドウを閉じたときにアプリが終わるか（メニューバーを置くと、SwiftUI の扱いが変わりうる）は未確認で、人による確認で見る。どちらの場合も、終了するときは今までどおり停止して保存を終えてから終わる
 
@@ -688,7 +700,7 @@ Phase 6 の画面（2026-11-17）:
 | 5 | [notes-ops.schema.json](../LiveMinutesKit/Sources/LiveMinutesKit/Resources/notes-ops.schema.json) がそのまま strict モードで受理されるか（null を含む `enum` の書き方など） | Phase 3 | 一部確認（2026-11-15）。公式の Supported schemas で、全プロパティ必須・`additionalProperties: false`・`["string", "null"]` の型配列・入れ子の `anyOf` が使えることを確認した。`enum` に `null` を含める書き方が許されるかは明記がなく確認できなかったため、`kind` を文書化された形 `anyOf: [{type: string, enum: [...]}, {type: null}]` に書き換えた（意味は同じ。§4.4・§4.5 の例は変更不要）。実際の API で受理されるかは、接続テストがこのスキーマを使うので、人による接続テストで確かめる。確認済み（2026-11-16、Phase 4B-1 の人による確認。ChatGPT プランの経路の接続テストが、このスキーマの strict の構造化出力で成功した。API キーの経路では未確認だが、スキーマの受理は経路によらないと見込む） |
 | 6 | Sol / Luna で推論量を下げる指定（応答を速くするため）があるか、その名前 | Phase 3 | 確認済み（2026-11-15、reasoning ガイドと各モデルのページ）。`reasoning: {"effort": ...}`。`gpt-6-luna` は `none` / `low` / `medium`（既定）/ `high` / `xhigh` / `max`、`gpt-6.1-sol` は `low` / `medium`（既定）/ `high` / `xhigh` / `max`（`none` は不可）。`none` が最も速い。ライブ更新は `low`（追加か更新か、要点か決定かの判断に少し推論を残す。送信間隔が8〜20秒なので数秒の差は問題にならない）、議事録は `medium` を既定にした。`max_output_tokens` は推論のトークンも含み、小さいと出力が空のまま `incomplete` になるので指定しない |
 | 7 | 専門用語を音声認識に反映させるAPIの有無と名前 | Phase 6 | API はある（2026-11-17、macOS 27.2 SDK の Speech の swiftinterface）。`SpeechAnalyzer.setContext(_:)` に `AnalysisContext` を渡し、`contextualStrings[.general]` に用語の配列を入れる。`SpeechTranscriber` がこれをどれだけ反映するかは文書に記載がなく未確認（実機で確かめる）。Whisper（ローカル）には反映しない（`DecodingOptions.promptTokens` はあるが、用語をトークンにする処理が要るため、範囲外とした） |
-| 8 | システム音声の取り込み方法（Core Audio のプロセスtap など）と必要な権限 | Phase 7 | 未確認 |
+| 8 | システム音声の取り込み方法（Core Audio のプロセスtap など）と必要な権限 | Phase 7 | 一部確認（2026-11-17、macOS 27.2 SDK のヘッダと Apple の記事「Capturing system audio with Core Audio taps」）。Core Audio のプロセス tap（`CATapDescription` + `AudioHardwareCreateProcessTap`、macOS 14.2 以降）で取り込み、tap を入れた集約デバイスをマイクと同じように入力として読む。Info.plist に `NSAudioCaptureUsageDescription` が必要で、集約デバイスから最初に録音を始めたときに「システムオーディオ録音のみ」の許可を求められる（キーがないと黙って拒否され、無音になるという報告がある）。特定のアプリだけ（`processes` / `bundleIDs`）、全体から自分を除く、などを選べる。App Sandbox のままで使えるかは、Apple の記事に記載がなく未確認（サンドボックスのアプリで許可の画面が出なかったという報告がある）。もう一つの候補の ScreenCaptureKit（`SCStream` の音声）は、画面収録の許可が要る。`SpeechAnalyzer` を2つ同時に動かせるかと負荷は未確認 |
 | 9 | ChatGPT プランの利用枠で、構造化出力（`text.format` の `json_schema`、strict）と `reasoning.effort` が使えるか。公式文書には、使えないパラメータの一覧にも、使えるものの説明にも出てこない | Phase 4B | 構造化出力は確認済み（2026-11-16、人による確認。ChatGPT プランでログインし、`gpt-6-luna` への接続テストが成功した。strict の `json_schema` をストリーミングで受けて読めた）。`reasoning.effort` はおそらく使える（`reasoning` を外して送り直したときに出すログが、システムのログに見当たらなかった。ただし、このアプリのログ自体が1件も見つからなかったので、確証はない） |
 | 10 | `gpt-6-luna` と `gpt-6.1-sol` が ChatGPT プランで使えるか（`GET /v1/models` に出るか） | Phase 4B | `gpt-6-luna` は確認済み（2026-11-16、人による確認。接続テストで「一覧にあります」と表示され、リクエストも成功した）。`gpt-6.1-sol` は未確認（議事録の仕上げを作る Phase 5 で確かめる） |
 | 11 | 「使用量を管理」のリンク先（ChatGPT の設定の使用量の画面）の URL | Phase 4B | 文書で確認（2026-11-16、UI/UX guidelines）。`https://chatgpt.com/settings/usage`。実際にその画面が開くかは、人による確認で見る |

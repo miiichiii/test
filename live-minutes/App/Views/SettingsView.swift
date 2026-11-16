@@ -80,6 +80,11 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Toggle("Mac 内の音声も取り込む（オンライン会議の相手の声など）", isOn: $settings.captureSystemAudio)
+                Text("マイクの音と、Mac から出る音を混ぜて文字起こしします（話者は分けません）。イヤホンで使ってください（スピーカーだと相手の声がマイクにも入り、二重になります）。初めて使うときに「システムオーディオ録音」の許可を求められます。拒否した場合は、マイクだけで文字起こしします。次に開始する会議から反映します。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Picker("書き起こしの方式", selection: $settings.transcriptionEngine) {
                     Text("Apple（端末内）").tag(TranscriptionEngineKind.apple)
                     Text("Whisper（ローカル）").tag(TranscriptionEngineKind.whisperLocal)

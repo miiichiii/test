@@ -32,6 +32,12 @@ public final class AppSettings {
         static let inputDeviceName = "LiveMinutes.inputDeviceName"
         static let transcriptionEngine = "LiveMinutes.transcriptionEngine"
         static let whisperModel = "LiveMinutes.whisperModel"
+        static let captureSystemAudio = "LiveMinutes.captureSystemAudio"
+    }
+
+    /// Mac 内の音声（オンライン会議の相手の声など）もマイクと混ぜて取り込む（Phase 7）。次に開始する会議から反映する
+    public var captureSystemAudio: Bool {
+        didSet { defaults.set(captureSystemAudio, forKey: Key.captureSystemAudio) }
     }
 
     /// 書き起こしの方式（Apple / Whisper（ローカル））。次に開始する会議から反映する
@@ -132,6 +138,7 @@ public final class AppSettings {
         inputDeviceName = defaults.string(forKey: Key.inputDeviceName) ?? ""
         transcriptionEngine = defaults.string(forKey: Key.transcriptionEngine).flatMap(TranscriptionEngineKind.init(rawValue:)) ?? .apple
         whisperModel = defaults.string(forKey: Key.whisperModel) ?? WhisperModelStore.defaultVariant
+        captureSystemAudio = defaults.object(forKey: Key.captureSystemAudio) as? Bool ?? false
     }
 
     /// 用語の入力欄の文字列（1行に1つ）を、登録する用語の一覧にする。前後の空白を除き、空行と重複を除く
