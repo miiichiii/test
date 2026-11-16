@@ -41,6 +41,20 @@ struct AppSettingsTests {
         #expect(reloaded.inputDeviceName == "USB マイク")
     }
 
+    @Test("書き起こしの方式と Whisper のモデルは保存され、既定は Apple と精度重視のモデル")
+    func persistsTranscriptionEngine() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.transcriptionEngine == .apple)
+        #expect(settings.whisperModel == WhisperModelStore.defaultVariant)
+        settings.transcriptionEngine = .whisperLocal
+        settings.whisperModel = "small"
+        let reloaded = AppSettings(defaults: defaults)
+        #expect(reloaded.transcriptionEngine == .whisperLocal)
+        #expect(reloaded.whisperModel == "small")
+    }
+
     @Test("接続方法は UserDefaults に保存され、作り直しても残る")
     func persistsAuthMethod() {
         let (defaults, suite) = makeDefaults()

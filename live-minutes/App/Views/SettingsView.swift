@@ -9,6 +9,7 @@ struct SettingsView: View {
     let connectionTest: ConnectionTest
     let chatGPTAccount: ChatGPTAccount
     let inputDevices: AudioInputDeviceList
+    let whisperModels: WhisperModelManager
     /// マイクを選び直したとき（UID。空なら Mac の設定のマイク）。録音中ならすぐに切り替える
     let onInputDeviceChange: (String) -> Void
     /// 認識言語の候補（BCP 47 の識別子）を読む
@@ -77,6 +78,14 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Picker("書き起こしの方式", selection: $settings.transcriptionEngine) {
+                    Text("Apple（端末内）").tag(TranscriptionEngineKind.apple)
+                    Text("Whisper（ローカル）").tag(TranscriptionEngineKind.whisperLocal)
+                }
+                if settings.transcriptionEngine == .whisperLocal {
+                    WhisperModelControls(settings: settings, models: whisperModels)
+                }
+
                 Picker("認識言語", selection: $settings.recognitionLocaleIdentifier) {
                     ForEach(localeOptions, id: \.self) { identifier in
                         Text(displayName(identifier)).tag(identifier)
@@ -93,6 +102,7 @@ struct SettingsView: View {
         .onChange(of: settings.liveModelID) { connectionTest.reset() }
         // 設定画面を開いている間だけ、マイクの一覧の変化を聞く。
         .task { await inputDevices.observe() }
+        .task { await whisperModels.refresh() }
         // 選んでいるマイクの名前が変わったら、保存している名前も合わせる（つながっていないときの表示用）。
         .onChange(of: inputDevices.devices) {
             if let device = inputDevices.devices.first(where: { $0.uid == settings.inputDeviceUID }),
@@ -306,5 +316,51 @@ private struct ChatGPTSignInControls: View {
             }
         }
         .help("既定のブラウザで ChatGPT にログインし、このアプリがプランの利用枠を使うことを許可します")
+    }
+}
+
+/// Whisper（ローカル）のモデルの選択・ダウンロード・削除（DESIGN.md §4.2）。
+private struct WhisperModelControls: View {
+    @Bindable var settings: AppSettings
+    let models: WhisperModelManager
+
+    var body: some View {
+        Picker("Whisper のモデル", selection: $settings.whisperModel) {
+            ForEach(WhisperModelStore.variants) { variant in
+                Text(label(for: variant)).tag(variant.id)
+            }
+        }
+        HStack(spacing: 8) {
+            switch models.state(of: settings.whisperModel) {
+            case .unknown:
+                ProgressView().controlSize(.small)
+            case .notDownloaded:
+                Text("未ダウンロード").foregroundStyle(.secondary)
+                Spacer()
+                Button("モデルをダウンロード") { models.download(settings.whisperModel) }
+            case .downloading(let value):
+                ProgressView(value: value).frame(maxWidth: 200)
+                Text("\(Int(value * 100))%").monospacedDigit().foregroundStyle(.secondary)
+                Spacer()
+                Button("キャンセル") { models.cancel(settings.whisperModel) }
+            case .downloaded:
+                Label("ダウンロード済み", systemImage: "checkmark.circle").foregroundStyle(.green)
+                Spacer()
+                Button("削除", role: .destructive) {
+                    Task { await models.delete(settings.whisperModel) }
+                }
+            case .failed(let message):
+                Text(message).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button("もう一度") { models.download(settings.whisperModel) }
+            }
+        }
+        Text("モデルは初回だけダウンロードし、この Mac に保存します（数百MB〜1.5GBほど）。書き起こしは Mac の中で行い、音声は外に出しません。初めて使うときは、モデルの読み込みに数分かかることがあります。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private func label(for variant: WhisperModelStore.Variant) -> String {
+        models.state(of: variant.id) == .downloaded ? variant.label : "\(variant.label)（未ダウンロード）"
     }
 }

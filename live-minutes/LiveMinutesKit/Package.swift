@@ -17,9 +17,17 @@ let package = Package(
     products: [
         .library(name: "LiveMinutesKit", targets: ["LiveMinutesKit"]),
     ],
+    dependencies: [
+        // ローカルの Whisper（Phase 4D）。利用者が 2026-11-16 に了承した外部ライブラリ（AGENTS.md の例外）。
+        // MIT（一部は NOTICES のとおり Apache 2.0）。版は固定する。
+        .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.1"),
+    ],
     targets: [
         .target(
             name: "LiveMinutesKit",
+            dependencies: [
+                .product(name: "WhisperKit", package: "argmax-oss-swift"),
+            ],
             // プロンプトとスキーマ。Bundle.module から読む（LLMResources）。
             resources: [.copy("Resources")],
             swiftSettings: swiftSettings

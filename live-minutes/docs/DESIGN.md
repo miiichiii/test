@@ -166,6 +166,15 @@ Apple の音声認識に加えて、OpenAI の Whisper のモデルを Mac の�
 - **失敗**: モデルの読み込みの失敗、メモリ不足などは、`TranscriptionError` に足して日本語で出す
 - **テスト**: 区切り方（無音と長さの上限、端の扱い）は合成した音声で確かめる純粋なロジックにする。エンジンは偽の `WhisperTranscriber` で確かめる。自動テストではモデルをダウンロードしない
 
+4D の実装で決めたこと（2026-11-17）:
+
+- **版とライセンス**: Argmax OSS 1.1.1 に固定した（`exact: "1.1.1"`）。LICENSE は MIT。NOTICES によると、`Sources/ArgmaxCore/External` の一部は Hugging Face の swift-transformers 由来で Apache 2.0。パッケージは Apple の swift-argument-parser にも依存するが、使うのはパッケージのコマンドラインツールだけで、このアプリには組み込まれない
+- **使った API**（1.1.1 のソースで確かめた）: `WhisperKit(WhisperKitConfig(modelFolder:verbose:logLevel:prewarm:load:download:))` で読み込み、`transcribe(audioArray:decodeOptions:)` に `DecodingOptions(task: .transcribe, language:, usePrefillPrompt: true, detectLanguage: false, skipSpecialTokens: true, withoutTimestamps: true)` を渡して書き起こす。ダウンロードは `WhisperKit.download(variant:downloadBase:progressCallback:)`。WhisperKit の型は Sendable でないので、`WhisperKitTranscriber`（actor）の中に閉じ込めた
+- **方式の切り替え**: `SwitchingTranscriptionEngine` が、開始のたびに設定の方式を読み、Apple の音声認識か `WhisperLocalEngine` に任せる。`SessionController` は認識言語が変わったときだけ `prepare` を呼ぶので、方式が変わっていたら、ここで前回のロケールで `prepare` してから開始する
+- **モデルの記録**: どのモデルをどのフォルダに置いたかは、保存先の `index.json` に書く（ダウンロードの返すフォルダをそのまま記録し、パッケージの中の置き方に頼らない）。読み込みは、モデル名が変わったときだけやり直す
+- **音声が自然に終わったとき**: 停止の操作によらずに音声のストリームが終わったら、残りの書き起こしを終えてからイベントのストリームを終える（`SessionController` はこれを認識の終了として扱う。Apple の音声認識と同じ）
+- **キャンセル**: ダウンロードのキャンセルは Task のキャンセルで伝える。パッケージがダウンロードを途中で止めるかは未確認。止まらずに終わった場合も、記録には残さない（途中までのファイルが保存先に残ることがある）
+
 ### 4.3 Transcript
 
 - `TranscriptStore`（`@MainActor`、`@Observable`）: 確定セグメントの配列と、現在の未確定テキストを持つ。`apply(_:)` で未確定は置き換え、確定は追加して未確定を消す。未確定テキストは頻繁に変わるので、確定セグメントとは別のプロパティにし、未確定の更新で一覧全体を再描画させない。時刻は録音経過時間に直したものを入れる
@@ -655,4 +664,4 @@ API キーでの接続テスト（§8 #5）を先に済ませておくと、Chat
 | 11 | 「使用量を管理」のリンク先（ChatGPT の設定の使用量の画面）の URL | Phase 4B | 文書で確認（2026-11-16、UI/UX guidelines）。`https://chatgpt.com/settings/usage`。実際にその画面が開くかは、人による確認で見る |
 | 12 | 初回のログイン（動的登録）で `redirect_uri` のポートを固定する必要があるか。文書には「2回目以降は変わってよい」とだけある | Phase 4B | 未確認（原文は「from initial registration onward」「Later sign-ins may use another available port」）。1455 が使用中のときの初回のログインで確かめる |
 | 13 | `inputNode.auAudioUnit.setDeviceID(_:)` で、`AVAudioEngine` の入力だけを既定と別のマイクにできるか（出力側の装置との組み合わせで失敗しないか）。`setDeviceID` 自体が `AVAudioEngineConfigurationChange` を出すか。選んだ装置の抜き差しで通知が来るか。マイクの許可の前でも一覧を取れるか | Phase 4C | 未確認。ヘッダで API があることは確かめた。実機で確かめる。`setDeviceID` で駄目なら `kAudioOutputUnitProperty_CurrentDevice` を試す |
-| 14 | Whisper（ローカル）の日本語の会議での精度と遅れ、モデルの読み込みの時間、メモリの使用量。Argmax OSS の API の名前と、モデルのダウンロードの仕組み | Phase 4D | 未確認。API はパッケージのソースで確かめる。精度と遅れは実機で、Apple の音声認識と比べて確かめる |
+| 14 | Whisper（ローカル）の日本語の会議での精度と遅れ、モデルの読み込みの時間、メモリの使用量。Argmax OSS の API の名前と、モデルのダウンロードの仕組み | Phase 4D | API は確認済み（2026-11-17、Argmax OSS 1.1.1 のソース。§4.2 の「4D の実装で決めたこと」）。モデルの名前（`large-v3-v20240930_626MB` など）はパッケージの README の例と同じだが、Hugging Face の一覧とは照らしていない。精度・遅れ・読み込みの時間・メモリ・ダウンロードのキャンセルは未確認（実機で、Apple の音声認識と比べて確かめる） |

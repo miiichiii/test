@@ -22,6 +22,7 @@ struct LiveMinutesApp: App {
                 connectionTest: appDelegate.connectionTest,
                 chatGPTAccount: appDelegate.chatGPTAccount,
                 inputDevices: appDelegate.inputDevices,
+                whisperModels: appDelegate.whisperModels,
                 onInputDeviceChange: { [microphone = appDelegate.microphone] uid in
                     Task { await microphone.setPreferredDevice(uid: uid) }
                 },
@@ -44,6 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// マイク。選び直しを伝えるために持つ
     let microphone: MicrophoneSource
     let inputDevices = AudioInputDeviceList()
+    /// Whisper（ローカル）のモデルのダウンロードと削除
+    let whisperModels: WhisperModelManager
 
     /// 最終確定（最大10秒）と保存を待つ上限。超えたら保存を諦めて終了する。
     private static let terminationTimeout: Duration = .seconds(12)
@@ -74,13 +77,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             client: llmClient,
             repository: repository
         )
+        // 書き起こしは、設定の方式（Apple / Whisper（ローカル））に従って会議ごとに選ぶ（DESIGN.md §4.2）。
+        let whisperStore = WhisperModelStore()
+        let transcriptionEngine = SwitchingTranscriptionEngine(
+            kind: { settings.transcriptionEngine },
+            apple: AppleSpeechEngine(),
+            whisper: WhisperLocalEngine(
+                modelName: { await MainActor.run { settings.whisperModel } },
+                load: { name in try await whisperStore.loadTranscriber(name) }
+            )
+        )
+        self.whisperModels = WhisperModelManager(store: whisperStore)
         let microphone = MicrophoneSource(preferredDeviceUID: settings.inputDeviceUID)
         self.microphone = microphone
         self.settings = settings
         self.secretStore = secretStore
         self.connectionTest = ConnectionTest(client: llmClient, modelCatalog: { try await llmClient.chatGPTModelSlugs() })
         let controller = SessionController(
-            engine: AppleSpeechEngine(),
+            engine: transcriptionEngine,
             source: microphone,
             permission: SystemMicrophonePermission(),
             repository: repository,

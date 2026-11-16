@@ -30,6 +30,18 @@ public final class AppSettings {
         static let authMethod = "LiveMinutes.authMethod"
         static let inputDeviceUID = "LiveMinutes.inputDeviceUID"
         static let inputDeviceName = "LiveMinutes.inputDeviceName"
+        static let transcriptionEngine = "LiveMinutes.transcriptionEngine"
+        static let whisperModel = "LiveMinutes.whisperModel"
+    }
+
+    /// 書き起こしの方式（Apple / Whisper（ローカル））。次に開始する会議から反映する
+    public var transcriptionEngine: TranscriptionEngineKind {
+        didSet { defaults.set(transcriptionEngine.rawValue, forKey: Key.transcriptionEngine) }
+    }
+
+    /// Whisper のモデル（`WhisperModelStore.variants` の id）
+    public var whisperModel: String {
+        didSet { defaults.set(whisperModel, forKey: Key.whisperModel) }
     }
 
     /// 使うマイクの UID（DESIGN.md §4.1「マイクの選択」）。空なら Mac の設定のマイク
@@ -118,6 +130,8 @@ public final class AppSettings {
         authMethod = defaults.string(forKey: Key.authMethod).flatMap(AuthMethod.init(rawValue:)) ?? .apiKey
         inputDeviceUID = defaults.string(forKey: Key.inputDeviceUID) ?? ""
         inputDeviceName = defaults.string(forKey: Key.inputDeviceName) ?? ""
+        transcriptionEngine = defaults.string(forKey: Key.transcriptionEngine).flatMap(TranscriptionEngineKind.init(rawValue:)) ?? .apple
+        whisperModel = defaults.string(forKey: Key.whisperModel) ?? WhisperModelStore.defaultVariant
     }
 
     /// リクエストに使うライブ更新用のモデルID（前後の空白を除く）。接続テストと本番で同じ値を使うため、ここからだけ読む

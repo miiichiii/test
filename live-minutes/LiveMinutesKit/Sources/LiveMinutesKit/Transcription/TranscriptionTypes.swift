@@ -38,6 +38,10 @@ public enum TranscriptionError: Error, Equatable, Sendable {
     case alreadyRunning
     /// 停止操作をしていないのに、音声認識の結果が途中で終わった
     case recognitionEnded
+    /// Whisper（ローカル）のモデルがダウンロードされていない（Phase 4D）
+    case whisperModelMissing
+    /// Whisper のモデルを読み込めない、または書き起こしに失敗した（詳細はログ用）
+    case whisperFailed(String)
 }
 
 extension TranscriptionError: LocalizedError {
@@ -50,6 +54,8 @@ extension TranscriptionError: LocalizedError {
         case .notPrepared: "音声認識の準備ができていません"
         case .alreadyRunning: "文字起こしはすでに開始しています"
         case .recognitionEnded: "音声認識が途中で終了しました"
+        case .whisperModelMissing: "Whisper のモデルがありません。設定画面の「文字起こし」でモデルをダウンロードしてください"
+        case .whisperFailed: "Whisper での書き起こしに失敗しました"
         }
     }
 }
