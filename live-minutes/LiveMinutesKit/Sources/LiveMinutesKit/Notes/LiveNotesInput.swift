@@ -20,7 +20,27 @@ struct LiveNotesInput: Encodable {
         let id: String
         let title: String
         let items: [ItemPayload]
+        /// 長い会議で、このトピックの項目を省いて送った（Phase 6）。省いていなければキーを出さない
+        var itemsOmitted = false
+
+        enum CodingKeys: String, CodingKey {
+            case id, title, items
+            case itemsOmitted = "items_omitted"
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(id, forKey: .id)
+            try container.encode(title, forKey: .title)
+            try container.encode(items, forKey: .items)
+            if itemsOmitted { try container.encode(true, forKey: .itemsOmitted) }
+        }
     }
+
+    /// ノートの JSON がこれを超えたら、古いトピックの項目を省く（DESIGN.md §4.5。Phase 6）
+    static let notesLimitCharacters = 6_000
+    /// 省くときも、項目をすべて送る直近のトピックの数
+    static let fullRecentTopics = 3
 
     struct ItemPayload: Encodable {
         let id: String
@@ -63,7 +83,7 @@ struct LiveNotesInput: Encodable {
 
     init(title: String, glossary: [String], notes: Notes, recentContext: String, segments: [TranscriptSegment]) {
         meeting = Meeting(title: title, glossary: glossary)
-        self.notes = NotesPayload(notes)
+        self.notes = NotesPayload.trimmed(notes)
         self.recentContext = recentContext
         newTranscript = segments.map(TranscriptLine.init)
     }
@@ -95,5 +115,27 @@ extension LiveNotesInput.NotesPayload {
 extension LiveNotesInput.TranscriptLine {
     init(_ segment: TranscriptSegment) {
         self.init(t: ElapsedTimeFormat.string(segment.start), text: segment.text)
+    }
+}
+
+extension LiveNotesInput.NotesPayload {
+    /// 長い会議のために絞った形（Phase 6）。JSON が上限を超えたら、直近の3トピックだけ項目を送り、
+    /// それより前のトピックはタイトルだけにする（`items_omitted: true`）。省いたトピックへの `add_item` も適用できる
+    /// （ノートの正はエンジンが持つ全体なので）。
+    static func trimmed(
+        _ notes: Notes,
+        limit: Int = LiveNotesInput.notesLimitCharacters,
+        recent: Int = LiveNotesInput.fullRecentTopics
+    ) -> LiveNotesInput.NotesPayload {
+        let full = LiveNotesInput.NotesPayload(notes)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(full), data.count > limit, full.topics.count > recent else { return full }
+        let cut = full.topics.count - recent
+        var topics = full.topics
+        for index in 0..<cut {
+            topics[index] = LiveNotesInput.TopicPayload(id: topics[index].id, title: topics[index].title, items: [], itemsOmitted: true)
+        }
+        return LiveNotesInput.NotesPayload(topics: topics)
     }
 }

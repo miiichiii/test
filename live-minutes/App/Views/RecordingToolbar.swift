@@ -149,6 +149,10 @@ private struct NotesStatusLabel: View {
                 ProgressView().controlSize(.small)
                 Text("ノート: 更新中").foregroundStyle(.secondary)
             }
+        case .offline:
+            Label("ノート: オフライン", systemImage: "wifi.slash")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.secondary)
         case .paused:
             Label("ノート: 送信停止中", systemImage: "pause.circle")
                 .labelStyle(.titleAndIcon)

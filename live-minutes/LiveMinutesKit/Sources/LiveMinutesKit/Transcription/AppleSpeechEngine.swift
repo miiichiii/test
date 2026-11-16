@@ -33,7 +33,14 @@ public actor AppleSpeechEngine: TranscriptionEngine {
     /// prepare で決めた入力形式（テスト用）。
     var preparedAudioFormat: AVAudioFormat? { analyzerFormat }
 
-    public init() {}
+    /// 音声認識に渡す用語（固有名詞や専門用語。Phase 6）。開始のたびに読む
+    private let contextualStrings: @Sendable () async -> [String]
+
+    /// - Parameter contextualStrings: 登録した用語を返す。`AnalysisContext.contextualStrings[.general]` として渡す
+    ///   （どれだけ反映されるかは DESIGN.md §8 #7 のとおり未確認）
+    public init(contextualStrings: @escaping @Sendable () async -> [String] = { [] }) {
+        self.contextualStrings = contextualStrings
+    }
 
     /// この Mac で端末内の音声認識が対応しているロケール（BCP 47 の識別子、並べ替え済み）。設定画面の一覧に使う。
     public static func supportedLocaleIdentifiers() async -> [String] {
@@ -94,6 +101,7 @@ public actor AppleSpeechEngine: TranscriptionEngine {
         do {
             // モデルを先に読み込み、マイクの音声が溜まる前に準備を終える。
             try await analyzer.prepareToAnalyze(in: analyzerFormat)
+            await applyContextualStrings(to: analyzer)
             try await analyzer.start(inputSequence: inputs)
         } catch {
             inputContinuation.finish()
@@ -243,4 +251,18 @@ public actor AppleSpeechEngine: TranscriptionEngine {
             attributeOptions: [.audioTimeRange]
         )
     }
+
+    /// 登録した用語を、音声認識の文脈として渡す。失敗しても認識は続ける（用語なしで認識するだけなので）。
+    private func applyContextualStrings(to analyzer: SpeechAnalyzer) async {
+        let terms = await contextualStrings()
+        guard !terms.isEmpty else { return }
+        let context = AnalysisContext()
+        context.contextualStrings[.general] = terms
+        do {
+            try await analyzer.setContext(context)
+        } catch {
+            Self.logger.notice("用語を音声認識に渡せなかった（\(terms.count) 件）: \(String(describing: type(of: error)), privacy: .public)")
+        }
+    }
+
 }

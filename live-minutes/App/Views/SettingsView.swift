@@ -22,6 +22,8 @@ struct SettingsView: View {
     @State private var hasAPIKey: Bool?
     @State private var keyMessage: KeyMessage?
     @State private var localeIdentifiers: [String] = []
+    /// 用語の入力欄（1行に1つ）。入力中の改行を消さないよう、文字列のまま持ち、変わるたびに一覧にして保存する
+    @State private var glossaryDraft = ""
     /// 保存・削除の処理中（連打で2本同時に走らせない）
     @State private var isUpdatingKey = false
 
@@ -95,6 +97,16 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("用語") {
+                TextEditor(text: $glossaryDraft)
+                    .font(.body)
+                    .frame(minHeight: 80, maxHeight: 140)
+                    .onChange(of: glossaryDraft) { settings.glossary = AppSettings.glossaryTerms(from: glossaryDraft) }
+                Text("固有名詞や専門用語の正しい表記を、1行に1つ書きます（人名、製品名、社内の用語など）。ノートの整理と議事録で、この表記を使います。Apple の音声認識にも手がかりとして渡します（Whisper には渡しません）。次に開始する会議から反映します。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 520)
@@ -131,6 +143,7 @@ struct SettingsView: View {
         // 保存しなかったキーを入力欄（メモリ）に残さない。
         .onDisappear { apiKeyInput = "" }
         .task {
+            glossaryDraft = settings.glossary.joined(separator: "\n")
             hasAPIKey = await secretStore.hasAPIKey()
             localeIdentifiers = await loadLocales()
         }

@@ -134,6 +134,14 @@ public final class AppSettings {
         whisperModel = defaults.string(forKey: Key.whisperModel) ?? WhisperModelStore.defaultVariant
     }
 
+    /// 用語の入力欄の文字列（1行に1つ）を、登録する用語の一覧にする。前後の空白を除き、空行と重複を除く
+    public nonisolated static func glossaryTerms(from text: String) -> [String] {
+        var seen = Set<String>()
+        return text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
     /// リクエストに使うライブ更新用のモデルID（前後の空白を除く）。接続テストと本番で同じ値を使うため、ここからだけ読む
     public var effectiveLiveModelID: String {
         liveModelID.trimmingCharacters(in: .whitespacesAndNewlines)

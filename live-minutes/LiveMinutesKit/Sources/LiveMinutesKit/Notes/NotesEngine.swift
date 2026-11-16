@@ -13,6 +13,8 @@ public enum LiveNotesStatus: Equatable, Sendable {
     case updating
     /// 「要約の送信を一時停止」がオン
     case paused
+    /// ネットワークにつながっていない（文字起こしは続く。つながったら送り直す。Phase 6）
+    case offline
     /// 失敗した。`needsRetry` が true なら自動では送り直さない（「再試行」か資格情報の変更で再開する）。
     /// `action` は案内に出す次の操作
     case failed(message: String, needsRetry: Bool, action: NotesFailureAction = .checkSettings)
@@ -481,10 +483,11 @@ public actor NotesEngine {
                 await report(.status(isPaused ? .paused : .failed(message: message, needsRetry: false)))
             }
         case .transient:
-            // 通信エラーなど。少し待って送り直す。
+            // 通信エラーなど。少し待って送り直す（ネットワークが戻ったと分かれば、その時点で送り直す）。
             retryNotBefore = now + configuration.maxInterval
             Self.logger.notice("ノートの更新に失敗。あとで送り直す: \(summary, privacy: .public)")
-            await report(.status(isPaused ? .paused : .failed(message: message, needsRetry: false)))
+            let status: LiveNotesStatus = llmError == .network ? .offline : .failed(message: message, needsRetry: false)
+            await report(.status(isPaused ? .paused : status))
         }
         // 一時停止中に失敗して戻った分は送らない。
         if isPaused {
@@ -526,6 +529,38 @@ public actor NotesEngine {
         if isPaused { return .paused }
         if isHalted { return .failed(message: haltMessage ?? "ノートを更新できませんでした。", needsRetry: true, action: haltAction) }
         return .waiting
+    }
+
+    // MARK: - 手で直す（Phase 6）
+
+    /// 項目の文言を直す。直した項目は固定し、以後のモデルの `update_item` と `remove_item` を無視する。
+    public func editItem(id: String, text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isClosed, !trimmed.isEmpty, let location = location(ofItem: id) else { return }
+        notes.topics[location.topic].items[location.item].text = trimmed
+        notes.topics[location.topic].items[location.item].isPinned = true
+        await applyManualChange(changed: [id])
+    }
+
+    /// 項目を消す（参加者の操作なので、固定の有無によらず消す）。
+    public func deleteItem(id: String) async {
+        guard !isClosed, let location = location(ofItem: id) else { return }
+        notes.topics[location.topic].items.remove(at: location.item)
+        await applyManualChange(changed: [])
+    }
+
+    private func location(ofItem id: String) -> (topic: Int, item: Int)? {
+        for (topicIndex, topic) in notes.topics.enumerated() {
+            if let itemIndex = topic.items.firstIndex(where: { $0.id == id }) {
+                return (topicIndex, itemIndex)
+            }
+        }
+        return nil
+    }
+
+    private func applyManualChange(changed: Set<String>) async {
+        await persist(notes)
+        await report(.applied(NotesReducer.Result(notes: notes, changedIDs: changed, ignored: [])))
     }
 
     // MARK: - recent_context

@@ -88,7 +88,10 @@ public final class SessionController {
         }
     }
 
-    public private(set) var state: State = .idle
+    public private(set) var state: State = .idle {
+        // 録音中（と、議事録を作っている確定中）はスリープさせない。ほかの状態に移ったら必ず解除する（失敗の場合も）。
+        didSet { sleepPreventer?.setPreventsSleep(state == .recording || state == .finishing) }
+    }
     public private(set) var activity: Activity?
     public private(set) var problem: Problem?
     public private(set) var warning: Warning?
@@ -100,6 +103,7 @@ public final class SessionController {
     /// 議事録（Phase 5。DESIGN.md §4.6）
     public let minutes: MinutesStore
     private let glossary: @MainActor () -> [String]
+    private let sleepPreventer: (any SleepPreventing)?
     /// 入力レベル（0…1）
     public private(set) var inputLevel: Float = 0
 
@@ -158,7 +162,8 @@ public final class SessionController {
         recognitionLocale: @escaping @MainActor () -> Locale = { Locale(identifier: "ja-JP") },
         notesEngineFactory: (@MainActor (SessionMeta, NotesStore) async -> NotesEngine?)? = nil,
         minutesGenerator: (any MinutesGenerating)? = nil,
-        glossary: @escaping @MainActor () -> [String] = { [] }
+        glossary: @escaping @MainActor () -> [String] = { [] },
+        sleepPreventer: (any SleepPreventing)? = nil
     ) {
         self.engine = engine
         self.source = source
@@ -169,12 +174,19 @@ public final class SessionController {
         self.notesEngineFactory = notesEngineFactory
         self.minutes = MinutesStore(generator: minutesGenerator, repository: repository)
         self.glossary = glossary
+        self.sleepPreventer = sleepPreventer
     }
 
     // MARK: - 画面から読む値
 
     /// 操作を受け付けない間は true
     public var isBusy: Bool { activity != nil }
+
+    /// 今受け付ける操作（メニューバーとショートカットの有効・無効に使う。Phase 6）
+    public var canStart: Bool { operation == nil && (state == .idle || state == .finished) }
+    public var canPause: Bool { operation == nil && state == .recording }
+    public var canResume: Bool { operation == nil && state == .paused }
+    public var canStop: Bool { operation == nil && (state == .recording || state == .paused) }
 
     /// 録音経過時間（一時停止中は進まない）
     public func elapsed() -> TimeInterval {
@@ -278,6 +290,27 @@ public final class SessionController {
             await engine.setPaused(paused)
         }
     }
+
+    /// ネットワークにつながった（Phase 6）。オフラインで待っていた送信を、すぐに送り直す。
+    public func networkDidBecomeAvailable() {
+        guard notes.status == .offline else { return }
+        retryNotes()
+    }
+
+    /// ノートの項目を手で直す（Phase 6）。会議中（ライブ更新が動いている間）だけ
+    public func editNoteItem(id: String, text: String) {
+        guard let engine = notesEngine else { return }
+        Task { await engine.editItem(id: id, text: text) }
+    }
+
+    /// ノートの項目を手で消す（Phase 6）
+    public func deleteNoteItem(id: String) {
+        guard let engine = notesEngine else { return }
+        Task { await engine.deleteItem(id: id) }
+    }
+
+    /// ノートを手で直せるか（ライブ更新が動いている会議中だけ）
+    public var canEditNotes: Bool { notesEngine != nil }
 
     /// ライブ更新の「再試行」。止まっている送信を再開する。
     public func retryNotes() {

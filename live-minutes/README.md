@@ -85,14 +85,14 @@ Phase 2 まで終われば、文字起こしアプリとして単体で使える
 | 4B ChatGPT でのログイン | `d000174`（4B-1）、`383d4ca`（4B-2） |
 | 4C マイクの選択 | `0f3331d` |
 | 4D Whisper（ローカル）での書き起こし | `679c44f` |
-| 5 議事録と履歴 | このコミット（`git log` の「Phase 5」） |
+| 5 議事録と履歴 | `08b99e3` |
+| 6 仕上げ | `git log` の「Phase 6」 |
 
-自動テストは 295 件あり、すべて通る（`cd LiveMinutesKit && swift test`）。
+自動テストは 307 件あり、すべて通る（`cd LiveMinutesKit && swift test`）。
 
 ### 次にやること（この順）
 
-1. **[Phase 6](docs/tasks/phase-6-polish.md)**: 仕上げ
-2. **[Phase 7](docs/tasks/phase-7-system-audio.md)**: Mac 内の音声（オンライン会議の相手の声）。利用者は、物理的なマイクと合わせて取り込みたい意向を示している（詳しい要望は未確認なので、始める前に聞く）
+1. **[Phase 7](docs/tasks/phase-7-system-audio.md)**: Mac 内の音声（オンライン会議の相手の声）。利用者は、物理的なマイクと合わせて取り込みたい意向を示している（詳しい要望は未確認なので、始める前に聞く）
 
 ### まだ確かめていないこと
 
@@ -111,7 +111,7 @@ Phase 2 まで終われば、文字起こしアプリとして単体で使える
 ### Codex への頼み方の例
 
 ```
-README.md の「今の状況と引き継ぎ」と AGENTS.md を読み、docs/tasks/phase-6-polish.md を実装してください。
+README.md の「今の状況と引き継ぎ」と AGENTS.md を読み、docs/tasks/phase-7-system-audio.md を実装してください（始める前に、利用者にマイクと Mac 内の音声をどう組み合わせたいかを聞いてください）。
 終わったら、AGENTS.md の「最終報告に書くこと」に従って日本語で報告し、そこで止めてください。コミットはしないでください。
 ```
 

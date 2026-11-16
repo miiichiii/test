@@ -20,6 +20,8 @@ public enum NotesReducer {
         case missingText
         /// 1回の応答の上限（20件）を超えた
         case overLimit
+        /// 参加者が手で直した項目への update_item / remove_item（Phase 6）
+        case pinnedItem
     }
 
     public struct IgnoredOp: Equatable, Sendable {
@@ -126,6 +128,10 @@ public enum NotesReducer {
                     ignore(.unknownItem)
                     continue
                 }
+                guard !notes.topics[location.topic].items[location.item].isPinned else {
+                    ignore(.pinnedItem)
+                    continue
+                }
                 // null（と空文字）のフィールドは変えない。
                 let original = notes.topics[location.topic].items[location.item]
                 var item = original
@@ -142,6 +148,10 @@ public enum NotesReducer {
             case .removeItem:
                 guard let location = locateItem(op.itemID) else {
                     ignore(.unknownItem)
+                    continue
+                }
+                guard !notes.topics[location.topic].items[location.item].isPinned else {
+                    ignore(.pinnedItem)
                     continue
                 }
                 let removed = notes.topics[location.topic].items.remove(at: location.item)

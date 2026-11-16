@@ -13,6 +13,14 @@ struct LiveMinutesApp: App {
             MainView(controller: appDelegate.controller, settings: appDelegate.settings, history: appDelegate.history)
         }
         .defaultSize(width: 960, height: 600)
+        .commands { MeetingCommands(controller: appDelegate.controller) }
+
+        // メニューバーから操作できるようにする（Phase 6）。録音中はアイコンで分かる。
+        MenuBarExtra {
+            MenuBarContent(controller: appDelegate.controller)
+        } label: {
+            MenuBarIcon(state: appDelegate.controller.state)
+        }
 
         // 設定画面（Cmd+, とツールバーの設定ボタン）
         Settings {
@@ -49,6 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let whisperModels: WhisperModelManager
     /// 過去のセッションの一覧（Phase 5）
     let history: SessionHistory
+    /// ネットワークの状態（つながったらノートの送信を再開する。Phase 6）
+    private let networkMonitor = NetworkMonitor()
+    private var networkTask: Task<Void, Never>?
 
     /// 最終確定（最大10秒）と保存を待つ上限。超えたら保存を諦めて終了する。
     private static let terminationTimeout: Duration = .seconds(12)
@@ -83,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let whisperStore = WhisperModelStore()
         let transcriptionEngine = SwitchingTranscriptionEngine(
             kind: { settings.transcriptionEngine },
-            apple: AppleSpeechEngine(),
+            apple: AppleSpeechEngine(contextualStrings: { await MainActor.run { settings.glossary } }),
             whisper: WhisperLocalEngine(
                 modelName: { await MainActor.run { settings.whisperModel } },
                 load: { name in try await whisperStore.loadTranscriber(name) }
@@ -121,7 +132,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             recognitionLocale: { settings.recognitionLocale },
             notesEngineFactory: { meta, store in await notesFactory.makeEngine(for: meta, store: store) },
             minutesGenerator: minutesWriter,
-            glossary: { settings.glossary }
+            glossary: { settings.glossary },
+            sleepPreventer: SystemSleepPreventer()
         )
         self.controller = controller
         self.chatGPTAccount = ChatGPTAccount(
@@ -130,6 +142,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onCredentialsChange: { Task { await controller.credentialsDidChange() } }
         )
         super.init()
+        let availability = networkMonitor.availability
+        networkTask = Task { [controller] in
+            for await isAvailable in availability where isAvailable {
+                controller.networkDidBecomeAvailable()
+            }
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

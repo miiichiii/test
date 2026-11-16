@@ -29,13 +29,32 @@ public struct NoteItem: Codable, Equatable, Identifiable, Sendable {
     public var text: String
     public var owner: String?
     public var due: String?
+    /// 参加者が手で直した（Phase 6）。以後のモデルの `update_item` と `remove_item` を無視する
+    public var isPinned: Bool
 
-    public init(id: String, kind: NoteKind, text: String, owner: String? = nil, due: String? = nil) {
+    public init(id: String, kind: NoteKind, text: String, owner: String? = nil, due: String? = nil, isPinned: Bool = false) {
         self.id = id
         self.kind = kind
         self.text = text
         self.owner = owner
         self.due = due
+        self.isPinned = isPinned
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, text, owner, due
+        case isPinned = "is_pinned"
+    }
+
+    /// Phase 5 までの notes.json（`is_pinned` がない）も読めるようにする。
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        kind = try container.decode(NoteKind.self, forKey: .kind)
+        text = try container.decode(String.self, forKey: .text)
+        owner = try container.decodeIfPresent(String.self, forKey: .owner)
+        due = try container.decodeIfPresent(String.self, forKey: .due)
+        isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
     }
 }
 

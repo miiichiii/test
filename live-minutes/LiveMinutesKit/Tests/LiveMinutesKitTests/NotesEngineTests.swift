@@ -136,7 +136,7 @@ struct NotesEngineTests {
 
         await client.respond(0, error: .network)
         await waitUntil { await !engine.isInFlight }
-        #expect(store.status == .failed(message: LLMError.network.localizedDescription, needsRetry: false))
+        #expect(store.status == .offline)
         #expect(await engine.pending.count == 1)
 
         await engine.add(segment(characters: 200, at: 20))

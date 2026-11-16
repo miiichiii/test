@@ -215,6 +215,10 @@ Phase 3 で決めた細かい規則:
 - `title` と `text` は前後の空白を除き、空白だけなら空として扱う。`update_item` では、null と空のフィールドは変えない。何も変わらなかった `update_item` はハイライトしない
 - 同じ応答の中で追加して削除した項目は、変更されたIDに含めない
 
+Phase 6 で足した規則（2026-11-17）:
+
+- **手で直した項目は固定する**: 参加者がノートペインで項目の文言を直すと、その項目に `isPinned`（`notes.json` では `is_pinned`）を立てる。固定した項目への `update_item` と `remove_item` は、理由「手で直した項目」（`pinnedItem`）で無視する。参加者が消すのは、固定の有無によらずできる。直すのも消すのも `NotesEngine` を通す（ノートの正はエンジンが持つ。送信中に直しても、応答は直した後のノートに適用されるので消えない）。手で直せるのは、ライブ更新が動いている会議の間だけ。Phase 5 までの `notes.json`（`is_pinned` がない）も読める
+
 ### 4.5 NotesEngine（ライブ更新）
 
 `NotesEngine`（actor）が、確定セグメントをためて Luna に送り、返ってきたopsを `NotesStore` に適用する。
@@ -294,7 +298,9 @@ Luna の出力（[notes-ops.schema.json](../LiveMinutesKit/Sources/LiveMinutesKi
 
 システムプロンプトは [live-notes.system.md](../LiveMinutesKit/Sources/LiveMinutesKit/Resources/live-notes.system.md)。リクエストごとに変わらないので、常に同じ文字列を先頭に置く（プロバイダ側のプロンプトキャッシュが効きやすくなる）。日時など変わる値をシステムプロンプトに埋め込まない。
 
-長い会議でノートが大きくなった場合の扱いは Phase 6 で入れる（全トピックのタイトルと、直近3トピックの全項目だけを送る）。
+長い会議でノートが大きくなった場合の扱い（Phase 6 で入れた）: ノートの JSON が 6,000 文字を超え、トピックが4つ以上あれば、直近3トピックだけ項目を送り、それより前のトピックはタイトルだけにして `"items_omitted": true` を付ける（プロンプトにも、省いた項目を重複して足さないこと、省いたトピックにも `add_item` できることを書いた）。ノートの正はエンジンが持つ全体なので、省いたトピックへの `add_item` も適用できる。
+
+オフライン（Phase 6）: 送信が通信エラー（ネットワークにつながらない）で失敗したら、状態を「オフライン」（`LiveNotesStatus.offline`）にし、ノートペインに「オフライン。文字起こしは継続中」と出す。今までどおり20秒後に送り直すほか、`NWPathMonitor` でネットワークにつながったと分かったら、その時点で送り直す（`SessionController.networkDidBecomeAvailable()`）。タイムアウトはオフラインとしない。
 
 ### 4.6 MinutesWriter（議事録仕上げ）
 
@@ -405,6 +411,7 @@ Phase 2 で決めたこと:
 - **操作は1つずつ**。開始・一時停止・再開・停止は処理中（`activity`）を持ち、その間はほかの操作を無視する。公開する状態は上の6つのままにし、「一時停止の確定中」「再開中」は `activity` で表す
 - **一時停止は `TranscriptionEngine.stop()`、再開は `start(source:)`**。一時停止の時点で未確定分まで確定でき、マイクも止まる。`SpeechAnalyzer` を生かしたままソースだけ止める案は、入力のない analyzer を長く生かしたときの挙動が未確認なので採らない。再開時に analyzer を作り直す時間がかかる
 - **再開後の時刻のずらし**: エンジンの時刻は再開のたびに0から始まるので、再開後のセグメントには `max(一時停止時点の録音経過時間, 直前の区間の最後の確定の end)` を足してから表示・保存する。録音経過時間を基準にするのは表示中の経過時間と揃えるため、下限を付けるのは停止を押してからマイクが止まるまでの分だけ確定の end が経過時間を超えることがあるため。ずらし幅はイベントを読む Task を作るときに決めて渡す
+- **スリープ防止**（Phase 6）: 録音中と確定中（議事録を作っている間）は、`ProcessInfo.beginActivity(.idleSystemSleepDisabled)` でアイドルによるスリープを止める。`state` が変わるたびに決め直すので、一時停止・停止・認識の失敗のどれでも解除される。画面の消灯は止めない
 - **録音経過時間**は録音区間の合計で、一時停止中は進まない。時計はスリープ中に進まないもの（`SuspendingClock`）を使う（スリープ中はマイクも止まるため）
 - イベントを読む Task の中で、`TranscriptStore` への反映と `transcript.jsonl` への追記を1件ずつ順に行う（保存の順序を保つため、別の Task に投げない）
 - 追記に失敗しても文字起こしは続け、警告を1回だけ表示する。セッションのフォルダを作れない場合は、開始そのものを失敗にする
@@ -628,6 +635,14 @@ API キーでの接続テスト（§8 #5）を先に済ませておくと、Chat
 
 色だけに頼らず、種類はラベルの文字でも分かるようにする。
 
+Phase 6 の画面（2026-11-17）:
+
+- **メニューバー**: アイコン（待機中は波形、録音中は塗りつぶしの録音の印、一時停止中は一時停止の印）から、開始・一時停止・再開・停止・「要約の送信を一時停止」・ウィンドウを開く・終了ができる。今の状態と経過時間も出す
+- **ショートカット**（メニューの「会議」）: 開始 ⇧⌘R、一時停止 / 再開 ⇧⌘P、停止 ⇧⌘E、要約の送信を一時停止 ⇧⌘H。メニューとショートカットからの開始は、会議名の入力を省き、開始日時から名前を付ける（ウィンドウが隠れていても使えるように）
+- **用語**: 設定画面の「用語」に、1行に1つ書く（前後の空白・空行・重複は除く）。ライブ更新と議事録の `glossary` に入れ、Apple の音声認識には `AnalysisContext.contextualStrings` として渡す（§8 #7）。Whisper には渡さない。次に開始する会議から反映する
+- **ノートの手動の修正**: 会議中、項目を右クリックして「文言を直す…」「削除」。直した項目にはピンの印を付ける
+- **文字起こしの表示**（長い会議）: 行ごとの View を `LazyVStack` に並べ、未確定の更新で確定行を組み直さない作り（Phase 2）のままにした。2時間の会議で重くならないかは、人による確認で見る
+
 ## 6. プライバシーと障害時の動作
 
 - 音声は端末内で処理し、保存も送信もしない
@@ -643,7 +658,7 @@ API キーでの接続テスト（§8 #5）を先に済ませておくと、Chat
 - 署名はローカル実行用（Sign to Run Locally）。`project.yml` では `CODE_SIGN_IDENTITY: "-"`、チームなしで表す
 - `Info.plist`: `NSMicrophoneUsageDescription`、`NSSpeechRecognitionUsageDescription`。手書きのファイル（`App/Info.plist`）を `INFOPLIST_FILE` で参照する。XcodeGen の `info:` / `entitlements:` キーは、生成のたびにファイルを書き出すので使わない
 - entitlements: `com.apple.security.app-sandbox`、`com.apple.security.device.audio-input`、`com.apple.security.network.client`、`com.apple.security.files.user-selected.read-write`（Phase 2 の書き出しで、利用者が選んだ場所に保存するため）、`com.apple.security.network.server`（Phase 4B の ChatGPT ログインで、`127.0.0.1` でコールバックを待ち受けるため）
-- ウィンドウは1つだけ（`WindowGroup` ではなく `Window`）。会議は同時に1つしか扱わないため。単一の `Window` は、閉じるとアプリが終了する。録音中に閉じた（終了した）ときは、停止して保存を終えてから終了する（§4.10）。メニューバー常駐との両立は Phase 6 で決める
+- ウィンドウは1つだけ（`WindowGroup` ではなく `Window`）。会議は同時に1つしか扱わないため。単一の `Window` は、閉じるとアプリが終了する。録音中に閉じた（終了した）ときは、停止して保存を終えてから終了する（§4.10）。メニューバー常駐との両立は Phase 6 で決めた: ウィンドウとメニューバーの両方を置く。ウィンドウを閉じたときにアプリが終わるか（メニューバーを置くと、SwiftUI の扱いが変わりうる）は未確認で、人による確認で見る。どちらの場合も、終了するときは今までどおり停止して保存を終えてから終わる
 
 並行性の設定（Phase 0 で決めた。途中で変えると挙動が変わるので、アプリとパッケージで揃えて固定する）:
 
@@ -672,7 +687,7 @@ API キーでの接続テスト（§8 #5）を先に済ませておくと、Chat
 | 4 | Responses API の構造化出力のリクエスト形（§4.7）、応答から出力テキストと拒否を読み取る方法、`store` パラメータ、ストリーミングのイベント名 | Phase 3 | 確認済み（2026-11-15、公式ドキュメントの structured outputs・conversation state・streaming のガイドと、公式 Python SDK の型定義）。形は設計時の想定どおりで、§4.7 に応答の読み方とイベント名を書き足した。`store` は既定で保存（30日）で、`false` で保存しない。`output_text` の集約は SDK の便利機能で生の JSON にはない。API リファレンスのページは大きすぎて全体を読めなかったため、イベント名と応答のフィールドは公式 SDK のソースで確かめた。実際の応答での動作は人による接続テストで確かめる |
 | 5 | [notes-ops.schema.json](../LiveMinutesKit/Sources/LiveMinutesKit/Resources/notes-ops.schema.json) がそのまま strict モードで受理されるか（null を含む `enum` の書き方など） | Phase 3 | 一部確認（2026-11-15）。公式の Supported schemas で、全プロパティ必須・`additionalProperties: false`・`["string", "null"]` の型配列・入れ子の `anyOf` が使えることを確認した。`enum` に `null` を含める書き方が許されるかは明記がなく確認できなかったため、`kind` を文書化された形 `anyOf: [{type: string, enum: [...]}, {type: null}]` に書き換えた（意味は同じ。§4.4・§4.5 の例は変更不要）。実際の API で受理されるかは、接続テストがこのスキーマを使うので、人による接続テストで確かめる。確認済み（2026-11-16、Phase 4B-1 の人による確認。ChatGPT プランの経路の接続テストが、このスキーマの strict の構造化出力で成功した。API キーの経路では未確認だが、スキーマの受理は経路によらないと見込む） |
 | 6 | Sol / Luna で推論量を下げる指定（応答を速くするため）があるか、その名前 | Phase 3 | 確認済み（2026-11-15、reasoning ガイドと各モデルのページ）。`reasoning: {"effort": ...}`。`gpt-6-luna` は `none` / `low` / `medium`（既定）/ `high` / `xhigh` / `max`、`gpt-6.1-sol` は `low` / `medium`（既定）/ `high` / `xhigh` / `max`（`none` は不可）。`none` が最も速い。ライブ更新は `low`（追加か更新か、要点か決定かの判断に少し推論を残す。送信間隔が8〜20秒なので数秒の差は問題にならない）、議事録は `medium` を既定にした。`max_output_tokens` は推論のトークンも含み、小さいと出力が空のまま `incomplete` になるので指定しない |
-| 7 | 専門用語を音声認識に反映させるAPIの有無と名前 | Phase 6 | 未確認 |
+| 7 | 専門用語を音声認識に反映させるAPIの有無と名前 | Phase 6 | API はある（2026-11-17、macOS 27.2 SDK の Speech の swiftinterface）。`SpeechAnalyzer.setContext(_:)` に `AnalysisContext` を渡し、`contextualStrings[.general]` に用語の配列を入れる。`SpeechTranscriber` がこれをどれだけ反映するかは文書に記載がなく未確認（実機で確かめる）。Whisper（ローカル）には反映しない（`DecodingOptions.promptTokens` はあるが、用語をトークンにする処理が要るため、範囲外とした） |
 | 8 | システム音声の取り込み方法（Core Audio のプロセスtap など）と必要な権限 | Phase 7 | 未確認 |
 | 9 | ChatGPT プランの利用枠で、構造化出力（`text.format` の `json_schema`、strict）と `reasoning.effort` が使えるか。公式文書には、使えないパラメータの一覧にも、使えるものの説明にも出てこない | Phase 4B | 構造化出力は確認済み（2026-11-16、人による確認。ChatGPT プランでログインし、`gpt-6-luna` への接続テストが成功した。strict の `json_schema` をストリーミングで受けて読めた）。`reasoning.effort` はおそらく使える（`reasoning` を外して送り直したときに出すログが、システムのログに見当たらなかった。ただし、このアプリのログ自体が1件も見つからなかったので、確証はない） |
 | 10 | `gpt-6-luna` と `gpt-6.1-sol` が ChatGPT プランで使えるか（`GET /v1/models` に出るか） | Phase 4B | `gpt-6-luna` は確認済み（2026-11-16、人による確認。接続テストで「一覧にあります」と表示され、リクエストも成功した）。`gpt-6.1-sol` は未確認（議事録の仕上げを作る Phase 5 で確かめる） |
