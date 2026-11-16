@@ -84,15 +84,15 @@ Phase 2 まで終われば、文字起こしアプリとして単体で使える
 | 4 ライブ整理 | `3e3fa23` |
 | 4B ChatGPT でのログイン | `d000174`（4B-1）、`383d4ca`（4B-2） |
 | 4C マイクの選択 | `0f3331d` |
+| 4D Whisper（ローカル）での書き起こし | `679c44f` |
 
-自動テストは 283 件あり、すべて通る（`cd LiveMinutesKit && swift test`）。Phase 4D は実装済みで、利用者の確認待ち（未コミット）。
+自動テストは 283 件あり、すべて通る（`cd LiveMinutesKit && swift test`）。
 
 ### 次にやること（この順）
 
-1. **[Phase 4D](docs/tasks/phase-4d-whisper-local.md)**: Whisper（ローカル）での書き起こし。利用者が Apple の音声認識と比べたいと求めた。外部ライブラリ Argmax OSS（旧 WhisperKit）を足すことは、利用者が了承済み（AGENTS.md の例外）
-2. **[Phase 5](docs/tasks/phase-5-minutes.md)**: 議事録と履歴
-3. **[Phase 6](docs/tasks/phase-6-polish.md)**: 仕上げ
-4. **[Phase 7](docs/tasks/phase-7-system-audio.md)**: Mac 内の音声（オンライン会議の相手の声）。利用者は、物理的なマイクと合わせて取り込みたい意向を示している（詳しい要望は未確認なので、始める前に聞く）
+1. **[Phase 5](docs/tasks/phase-5-minutes.md)**: 議事録と履歴
+2. **[Phase 6](docs/tasks/phase-6-polish.md)**: 仕上げ
+3. **[Phase 7](docs/tasks/phase-7-system-audio.md)**: Mac 内の音声（オンライン会議の相手の声）。利用者は、物理的なマイクと合わせて取り込みたい意向を示している（詳しい要望は未確認なので、始める前に聞く）
 
 ### まだ確かめていないこと
 
@@ -111,7 +111,7 @@ Phase 2 まで終われば、文字起こしアプリとして単体で使える
 ### Codex への頼み方の例
 
 ```
-README.md の「今の状況と引き継ぎ」と AGENTS.md を読み、docs/tasks/phase-4d-whisper-local.md を実装してください。
+README.md の「今の状況と引き継ぎ」と AGENTS.md を読み、docs/tasks/phase-5-minutes.md を実装してください。
 終わったら、AGENTS.md の「最終報告に書くこと」に従って日本語で報告し、そこで止めてください。コミットはしないでください。
 ```
 
