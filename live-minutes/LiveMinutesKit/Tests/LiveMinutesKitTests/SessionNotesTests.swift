@@ -229,7 +229,7 @@ struct SessionNotesTests {
         await controller.start()
         #expect(controller.notes.status == .notConfigured)
         keyBox.hasKey = true
-        await controller.apiKeyDidChange()
+        await controller.credentialsDidChange()
         #expect(controller.notes.status == .waiting)
 
         await engine.emit(.final(segment("キーを入れた後の発言")))
@@ -258,13 +258,13 @@ extension SessionNotesTests {
             return false
         }
 
-        await controller.apiKeyDidChange()
+        await controller.credentialsDidChange()
         await waitUntil { await client.requests.count == 2 }
         await client.respond(1, ops: [])
         await waitUntil { controller.notes.status == .waiting }
 
         await controller.finishForTermination()
-        await controller.apiKeyDidChange()
+        await controller.credentialsDidChange()
         #expect(controller.notes.status == .inactive)
         #expect(await client.requests.count == 2)
     }

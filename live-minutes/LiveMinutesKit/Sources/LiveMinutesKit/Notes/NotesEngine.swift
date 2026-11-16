@@ -466,8 +466,12 @@ public actor NotesEngine {
                     self = .permanent
                 case .refusal, .incomplete, .invalidOutput, .failed:
                     self = .content
-                case .network, .timeout, .rateLimited, .server:
+                case .network, .timeout, .rateLimited, .server, .planUsageUnavailable:
                     self = .transient
+                // ChatGPT のプランの利用枠（DESIGN.md §4.11）。時間をおいても直らないので止める。
+                case .chatGPTSignInRequired, .chatGPTPlanNotGranted, .chatGPTCredentialUnavailable, .chatGPTUnauthorized,
+                     .chatGPTRejected, .usageLimitReached, .planNotEligible, .unsupportedCapability:
+                    self = .permanent
                 }
             case is DecodingError, is EncodingError:
                 self = .content

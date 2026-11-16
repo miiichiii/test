@@ -1,15 +1,17 @@
+import AppKit
 import LiveMinutesKit
 import SwiftUI
 
-/// 設定画面: OpenAI の API キー、モデルID、接続テスト、認識言語。
+/// 設定画面: OpenAI への接続方法（API キー / ChatGPT プラン）、モデルID、接続テスト、認識言語。
 struct SettingsView: View {
     @Bindable var settings: AppSettings
     let secretStore: any SecretStore
     let connectionTest: ConnectionTest
+    let chatGPTAccount: ChatGPTAccount
     /// 認識言語の候補（BCP 47 の識別子）を読む
     let loadLocales: () async -> [String]
-    /// API キーを保存・削除したとき（会議中なら、その時点からノートの更新を始める・再開する）
-    let onAPIKeyChange: () -> Void
+    /// 資格情報が変わったとき（API キーの保存・削除、接続方法の変更。会議中なら、その時点からノートの更新を始める・再開する）
+    let onCredentialsChange: () -> Void
 
     @State private var apiKeyInput = ""
     /// 保存済みか。確かめるまでは nil
@@ -22,28 +24,18 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("OpenAI") {
-                LabeledContent("API キー") {
-                    switch hasAPIKey {
-                    case true?: Label("保存済み", systemImage: "checkmark.seal").foregroundStyle(.green)
-                    case false?: Text("未設定").foregroundStyle(.secondary)
-                    case nil: ProgressView().controlSize(.small)
-                    }
+                Picker("接続方法", selection: $settings.authMethod) {
+                    Text("API キー").tag(AuthMethod.apiKey)
+                    Text("ChatGPT プラン").tag(AuthMethod.chatGPTPlan)
                 }
-                SecureField("新しい API キー", text: $apiKeyInput, prompt: Text("sk-…"))
-                HStack {
-                    Button("保存") { Task { await saveKey() } }
-                        .disabled(isUpdatingKey || apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Button("削除", role: .destructive) { Task { await deleteKey() } }
-                        .disabled(isUpdatingKey || hasAPIKey != true)
-                    if let keyMessage {
-                        Text(keyMessage.text)
-                            .font(.callout)
-                            .foregroundStyle(keyMessage.isError ? .red : .secondary)
-                    }
+                .pickerStyle(.segmented)
+
+                switch settings.authMethod {
+                case .apiKey:
+                    apiKeyControls
+                case .chatGPTPlan:
+                    ChatGPTSignInControls(account: chatGPTAccount)
                 }
-                Text("キーはこの Mac のキーチェーンにだけ保存します。画面には表示しません。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section("モデル") {
@@ -58,7 +50,13 @@ struct SettingsView: View {
                     .disabled(connectionTest.status == .running)
                     ConnectionStatusView(status: connectionTest.status)
                 }
-                Text("ライブ更新用のモデルに短いリクエストを1回送り、キーとモデルIDを確かめます（料金がわずかにかかります）。")
+                if let note = connectionTest.modelListNote {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                Text("ライブ更新用のモデルに短いリクエストを1回送り、接続とモデルIDを確かめます（API キーでは料金がわずかにかかり、ChatGPT プランでは利用枠をわずかに使います）。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -78,12 +76,45 @@ struct SettingsView: View {
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: settings.liveModelID) { connectionTest.reset() }
+        .onChange(of: settings.authMethod) {
+            connectionTest.reset()
+            onCredentialsChange()
+        }
+        // ログイン・ログアウトしたら、前の接続テストの結果を消す。
+        .onChange(of: chatGPTAccount.state) { connectionTest.reset() }
         // 保存しなかったキーを入力欄（メモリ）に残さない。
         .onDisappear { apiKeyInput = "" }
         .task {
             hasAPIKey = await secretStore.hasAPIKey()
             localeIdentifiers = await loadLocales()
         }
+    }
+
+    /// API キーの入力・保存・削除
+    @ViewBuilder
+    private var apiKeyControls: some View {
+        LabeledContent("API キー") {
+            switch hasAPIKey {
+            case true?: Label("保存済み", systemImage: "checkmark.seal").foregroundStyle(.green)
+            case false?: Text("未設定").foregroundStyle(.secondary)
+            case nil: ProgressView().controlSize(.small)
+            }
+        }
+        SecureField("新しい API キー", text: $apiKeyInput, prompt: Text("sk-…"))
+        HStack {
+            Button("保存") { Task { await saveKey() } }
+                .disabled(isUpdatingKey || apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("削除", role: .destructive) { Task { await deleteKey() } }
+                .disabled(isUpdatingKey || hasAPIKey != true)
+            if let keyMessage {
+                Text(keyMessage.text)
+                    .font(.callout)
+                    .foregroundStyle(keyMessage.isError ? .red : .secondary)
+            }
+        }
+        Text("キーはこの Mac のキーチェーンにだけ保存します。画面には表示しません。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     /// 候補の一覧。保存されている値が一覧になくても選べるように足す（空欄にしないため）。
@@ -108,7 +139,7 @@ struct SettingsView: View {
             hasAPIKey = true
             keyMessage = KeyMessage(text: "保存しました", isError: false)
             connectionTest.reset()
-            onAPIKeyChange()
+            onCredentialsChange()
         } catch {
             keyMessage = KeyMessage(text: error.localizedDescription, isError: true)
         }
@@ -123,7 +154,7 @@ struct SettingsView: View {
             hasAPIKey = false
             keyMessage = KeyMessage(text: "削除しました", isError: false)
             connectionTest.reset()
-            onAPIKeyChange()
+            onCredentialsChange()
         } catch {
             keyMessage = KeyMessage(text: error.localizedDescription, isError: true)
         }
@@ -156,5 +187,80 @@ private struct ConnectionStatusView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
         }
+    }
+}
+
+/// ChatGPT でのログイン（DESIGN.md §5・§4.11）。
+private struct ChatGPTSignInControls: View {
+    let account: ChatGPTAccount
+
+    var body: some View {
+        switch account.state {
+        case .unknown:
+            ProgressView().controlSize(.small)
+        case .signedOut, .needsSignIn, .unavailable:
+            if case .needsSignIn = account.state {
+                Label("ログインし直してください（ログインの有効期限が切れたか、取り消されました）。", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            } else if case .unavailable = account.state {
+                Label("キーチェーンからログインの情報を読めませんでした。アクセスを許可するか、ログインし直してください。", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+            signInButton("ChatGPT で続ける", mode: .sameAccount)
+            // 保存済みの登録と別のアカウントを使うときは、新しく登録し直す。
+            signInButton("別のアカウントでログイン", mode: .newAccount)
+                .buttonStyle(.link)
+        case .signingIn:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("ブラウザでログインしてください…").foregroundStyle(.secondary)
+                Button("キャンセル") { account.cancelSignIn() }
+            }
+        case .signedIn(let email, let planUsageGranted):
+            LabeledContent("アカウント") {
+                Text(email ?? "（メールアドレスなし）").textSelection(.enabled)
+            }
+            if planUsageGranted {
+                Label("ChatGPT プランを使用中", systemImage: "checkmark.seal")
+                    .foregroundStyle(.green)
+            } else {
+                Label("プランの利用が許可されていません。もう一度ログインして許可してください。", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                signInButton("もう一度ログインして許可する", mode: .grantPlanUsage)
+            }
+            HStack {
+                if let usage = ChatGPTLinks.usage {
+                    Link("使用量を管理", destination: usage)
+                }
+                Spacer()
+                Button("ログアウト", role: .destructive) {
+                    Task { await account.signOut() }
+                }
+                .disabled(account.isSigningOut)
+            }
+        }
+        if let message = account.message {
+            Text(message.text)
+                .font(.callout)
+                .foregroundStyle(message.isError ? .red : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        Text("AI へのリクエストに、ChatGPT のプランの利用枠を使います（API キーの料金はかかりません）。ログインの情報はこの Mac のキーチェーンにだけ保存します。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            // ChatGPT プランを表示したときだけ、キーチェーンから読む。
+            .task { await account.load() }
+    }
+
+    private func signInButton(_ title: String, mode: ChatGPTAuth.SignInMode) -> some View {
+        Button(title) {
+            Task {
+                // ログインが終わったら、ブラウザからアプリに戻す。
+                if await account.signIn(mode: mode) {
+                    NSApplication.shared.activate()
+                }
+            }
+        }
+        .help("既定のブラウザで ChatGPT にログインし、このアプリがプランの利用枠を使うことを許可します")
     }
 }

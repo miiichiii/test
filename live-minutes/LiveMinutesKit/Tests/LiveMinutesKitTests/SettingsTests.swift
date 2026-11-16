@@ -25,6 +25,16 @@ struct AppSettingsTests {
         #expect(settings.notesMaxInterval == 20)
         #expect(settings.notesMinInterval == 8)
         #expect(settings.glossary.isEmpty)
+        #expect(settings.authMethod == .apiKey)
+    }
+
+    @Test("接続方法は UserDefaults に保存され、作り直しても残る")
+    func persistsAuthMethod() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.authMethod = .chatGPTPlan
+        #expect(AppSettings(defaults: defaults).authMethod == .chatGPTPlan)
     }
 
     @Test("変更は UserDefaults に保存され、作り直しても残る")
@@ -169,6 +179,45 @@ struct ConnectionTestTests {
         let test = ConnectionTest(client: FakeLLMClient { _ in throw error })
         await test.run(model: "gpt-6-luna", reasoningEffort: "low")
         #expect(test.status == .failed(error.localizedDescription))
+    }
+
+    @Test("ChatGPT のときは、設定したモデルIDが使えるモデルの一覧にあるかを添える")
+    func modelListNote() async {
+        let client = FakeLLMClient { _ in Data(#"{"ops":[]}"#.utf8) }
+        let listed = ConnectionTest(client: client, modelCatalog: { ["gpt-6-luna", "gpt-6.1-sol"] })
+        await listed.run(model: "gpt-6-luna", reasoningEffort: "low")
+        #expect(listed.status == .succeeded)
+        #expect(listed.modelListNote?.contains("一覧にあります") == true)
+
+        let missing = ConnectionTest(client: client, modelCatalog: { ["gpt-6.1-sol"] })
+        await missing.run(model: "gpt-6-luna", reasoningEffort: "low")
+        #expect(missing.modelListNote?.contains("一覧にありません") == true)
+
+        let apiKey = ConnectionTest(client: client, modelCatalog: { nil })
+        await apiKey.run(model: "gpt-6-luna", reasoningEffort: "low")
+        #expect(apiKey.modelListNote == nil)
+    }
+
+    @Test("モデルの一覧を取得できなくても、接続テストは成功のまま")
+    func modelListFailureDoesNotFailTest() async {
+        let client = FakeLLMClient { _ in Data(#"{"ops":[]}"#.utf8) }
+        let test = ConnectionTest(client: client, modelCatalog: { throw LLMError.network })
+        await test.run(model: "gpt-6-luna", reasoningEffort: "low")
+        #expect(test.status == .succeeded)
+        #expect(test.modelListNote?.contains("取得できませんでした") == true)
+        test.reset()
+        #expect(test.modelListNote == nil)
+    }
+
+    @Test("ChatGPT のエラーも日本語で表示する", arguments: [
+        LLMError.chatGPTSignInRequired, .chatGPTPlanNotGranted, .usageLimitReached, .planNotEligible(message: nil),
+        .unsupportedCapability(param: "reasoning"), .chatGPTUnauthorized, .chatGPTRejected(code: "x"),
+    ])
+    func chatGPTFailure(error: LLMError) async {
+        let test = ConnectionTest(client: FakeLLMClient { _ in throw error })
+        await test.run(model: "gpt-6-luna", reasoningEffort: "low")
+        #expect(test.status == .failed(error.localizedDescription))
+        #expect(error.localizedDescription.isEmpty == false)
     }
 
     @Test("応答がノートの形と合わなければ失敗")

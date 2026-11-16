@@ -1,12 +1,15 @@
 import Foundation
 import os
+import Synchronization
 
-/// OpenAI Responses API（`POST /v1/responses`）による `LLMClient`（DESIGN.md §4.7）。外部ライブラリは使わない。
+/// OpenAI Responses API（`POST /v1/responses`）による `LLMClient`（DESIGN.md §4.7・§4.11）。外部ライブラリは使わない。
 ///
 /// - 応答を OpenAI 側に保存させないよう、`store: false` を必ず送る
 /// - 429（利用上限の不足を除く）・5xx・通信エラーは、間隔を空けて最大2回まで再試行する。401・403・400・404 などは再試行しない
+/// - 401 は資格情報の担当（`CredentialProvider`）に知らせ、新しい資格情報が得られれば1回だけ送り直す（再試行の回数とは別）
+/// - ChatGPT のプランの利用枠では `stream: true` が必須なので、構造化出力もストリーミングで受けてから読む
 /// - 構造化出力は、再試行を含む全体に締め切りを設ける。ストリーミングは無通信の時間に上限を設ける
-/// - API キーはリクエストのたびに読む。キーやリクエストの中身はログに出さない
+/// - 資格情報はリクエストのたびに読む。資格情報やリクエストの中身はログに出さない
 public struct OpenAIResponsesClient: LLMClient {
     public typealias APIKeyProvider = @Sendable () async throws -> String
     public typealias Sleep = @Sendable (Duration) async throws -> Void
@@ -20,9 +23,10 @@ public struct OpenAIResponsesClient: LLMClient {
 
     private let session: URLSession
     private let endpoint: URL
-    private let apiKey: APIKeyProvider
+    private let credentials: any CredentialProvider
     private let sleep: Sleep
-    private let onAuthenticationFailure: (@Sendable () async -> Void)?
+    /// ChatGPT のプランの利用枠で `reasoning` が使えないと分かったら、このプロセスの間は送らない
+    private let reasoningFallback = ReasoningFallback()
 
     private static let logger = Logger(subsystem: LiveMinutesInfo.logSubsystem, category: "LLM")
 
@@ -45,9 +49,22 @@ public struct OpenAIResponsesClient: LLMClient {
 
     /// - Parameters:
     ///   - session: テストでは URLProtocol のスタブを入れたセッションを渡す
-    ///   - apiKey: API キーを返す。ない場合は `LLMError.missingAPIKey` などを投げる
+    ///   - credentials: 資格情報（API キーか ChatGPT のアクセストークン）を返す
     ///   - sleep: 再試行の待ち。テストでは待たない関数を渡す
-    ///   - onAuthenticationFailure: 401 を受けたときに呼ぶ（持っているキーを捨てるため）
+    public init(
+        session: URLSession = OpenAIResponsesClient.makeSession(),
+        endpoint: URL = OpenAIResponsesClient.defaultEndpoint,
+        credentials: any CredentialProvider,
+        sleep: @escaping Sleep = { try await Task.sleep(for: $0) }
+    ) {
+        self.session = session
+        self.endpoint = endpoint
+        self.credentials = credentials
+        self.sleep = sleep
+    }
+
+    /// API キーだけで使う場合。
+    /// - Parameter onAuthenticationFailure: 401 を受けたときに呼ぶ（持っているキーを捨てるため）
     public init(
         session: URLSession = OpenAIResponsesClient.makeSession(),
         endpoint: URL = OpenAIResponsesClient.defaultEndpoint,
@@ -55,33 +72,65 @@ public struct OpenAIResponsesClient: LLMClient {
         sleep: @escaping Sleep = { try await Task.sleep(for: $0) },
         onAuthenticationFailure: (@Sendable () async -> Void)? = nil
     ) {
-        self.session = session
-        self.endpoint = endpoint
-        self.apiKey = apiKey
-        self.sleep = sleep
-        self.onAuthenticationFailure = onAuthenticationFailure
+        self.init(
+            session: session,
+            endpoint: endpoint,
+            credentials: APIKeyCredentialProvider(read: apiKey, invalidate: onAuthenticationFailure ?? {}),
+            sleep: sleep
+        )
     }
 
     // MARK: - 構造化出力
 
     public func structuredOutput(_ request: StructuredOutputRequest) async throws -> Data {
         // キーチェーンの許可ダイアログを待つ時間を締め切りに含めないよう、先に読む。
-        let key = try await apiKey()
-        let urlRequest = makeURLRequest(
-            body: try Self.structuredBody(request),
-            key: key,
-            // 締め切りより先に URLSession の無通信タイムアウトが来ないようにする。
-            timeoutInterval: request.timeout.seconds + 5,
-            streaming: false
-        )
+        let credential = try await credentials.credential()
         return try await Self.withDeadline(request.timeout) {
-            let data = try await self.send(urlRequest)
-            return try Self.parseStructuredResponse(data)
+            try await self.withCredentialRecovery(first: credential, model: request.model) { credential, includeReasoning in
+                try await self.structuredOutputOnce(request, credential: credential, includeReasoning: includeReasoning)
+            }
         }
     }
 
-    /// 再試行つきで送り、2xx の本文を返す。
-    private func send(_ request: URLRequest) async throws -> Data {
+    private func structuredOutputOnce(
+        _ request: StructuredOutputRequest,
+        credential: LLMCredential,
+        includeReasoning: Bool
+    ) async throws -> Data {
+        // 締め切りより先に URLSession の無通信タイムアウトが来ないようにする。
+        let timeoutInterval = request.timeout.seconds + 5
+        switch credential {
+        case .apiKey:
+            let urlRequest = makeURLRequest(
+                body: try Self.structuredBody(request, stream: false, includeReasoning: includeReasoning),
+                credential: credential,
+                timeoutInterval: timeoutInterval,
+                streaming: false
+            )
+            let data = try await send(urlRequest, method: credential.method)
+            return try Self.parseStructuredResponse(data)
+        case .chatGPTPlan:
+            // プランの利用枠は stream: true が必須。差分は外に出さず、完了まで集めてから読む。
+            let urlRequest = makeURLRequest(
+                body: try Self.structuredBody(request, stream: true, includeReasoning: includeReasoning),
+                credential: credential,
+                timeoutInterval: timeoutInterval,
+                streaming: true
+            )
+            let collected = TextCollector()
+            try await runStream(
+                urlRequest,
+                method: credential.method,
+                retriesAfterOutput: true,
+                beginAttempt: { collected.reset() },
+                yield: { collected.append($0) }
+            )
+            return try Self.validatedJSON(collected.text)
+        }
+    }
+
+    /// 2xx の本文を、再試行つきで受け取る。
+    private func send(_ request: URLRequest, method: AuthMethod) async throws -> Data {
         var attempt = 0
         while true {
             try Task.checkCancellation()
@@ -92,8 +141,7 @@ public struct OpenAIResponsesClient: LLMClient {
                 if (200..<300).contains(http.statusCode) {
                     return data
                 }
-                let error = Self.error(status: http.statusCode, body: data)
-                if error == .authentication { await onAuthenticationFailure?() }
+                let error = Self.error(status: http.statusCode, body: data, method: method)
                 guard attempt < Self.maxRetries, let wait = Self.retryDelay(for: error, attempt: attempt, http: http) else {
                     throw error
                 }
@@ -114,13 +162,85 @@ public struct OpenAIResponsesClient: LLMClient {
         }
     }
 
+    /// 401 と、ChatGPT で `reasoning` が使えない場合の回復をまとめる。
+    ///
+    /// - 401: 資格情報の担当に知らせ、新しい資格情報が得られたら1回だけ送り直す。種類が変わっていたら送り直さない
+    /// - ChatGPT で `param` が `reasoning` で始まる「使えない指定」: `reasoning` を外して1回だけ送り直し、
+    ///   以後そのモデルでは外す
+    /// - Parameter canRecover: 送り直してよいか（ストリーミングで差分を外に出した後は、文が重複するので送り直さない）
+    private func withCredentialRecovery<T: Sendable>(
+        first: LLMCredential,
+        model: String?,
+        canRecover: () -> Bool = { true },
+        _ operation: (LLMCredential, _ includeReasoning: Bool) async throws -> T
+    ) async throws -> T {
+        var credential = first
+        var didRetryUnauthorized = false
+        var didDropReasoning = false
+        while true {
+            let includeReasoning = credential.method == .apiKey || !reasoningFallback.isOmitted(for: model)
+            do {
+                return try await operation(credential, includeReasoning)
+            } catch let error as LLMError where !canRecover() {
+                throw error
+            } catch let error as LLMError where error.isUnauthorized && !didRetryUnauthorized {
+                didRetryUnauthorized = true
+                guard await credentials.handleUnauthorized(credential) else {
+                    // ChatGPT で更新が終端のエラーだった場合は、ログインし直しが必要と伝える。
+                    if credential.method == .chatGPTPlan {
+                        do {
+                            _ = try await credentials.credential()
+                        } catch let reason as LLMError {
+                            throw reason
+                        }
+                    }
+                    throw error
+                }
+                let next = try await credentials.credential()
+                guard next.method == credential.method else { throw error }
+                credential = next
+                Self.logger.notice("資格情報を更新して送り直す")
+            } catch let LLMError.unsupportedCapability(param)
+                where credential.method == .chatGPTPlan && includeReasoning && !didDropReasoning
+                && (param?.hasPrefix("reasoning") ?? false) {
+                didDropReasoning = true
+                reasoningFallback.omit(for: model)
+                Self.logger.notice("プランの利用枠で reasoning が使えないため、外して送り直す")
+            }
+        }
+    }
+
     // MARK: - ストリーミング
 
     public func streamText(_ request: TextStreamRequest) -> AsyncThrowingStream<String, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await runStream(request) { continuation.yield($0) }
+                    let credential = try await credentials.credential()
+                    let yielded = OutputFlag()
+                    try await withCredentialRecovery(
+                        first: credential,
+                        model: request.model,
+                        canRecover: { !yielded.isSet }
+                    ) { credential, includeReasoning in
+                        let urlRequest = makeURLRequest(
+                            body: try Self.streamBody(request, includeReasoning: includeReasoning),
+                            credential: credential,
+                            timeoutInterval: request.idleTimeout.seconds,
+                            streaming: true
+                        )
+                        // 差分を渡し始めた後に再試行すると、同じ文が重複するので再試行しない。
+                        try await runStream(
+                            urlRequest,
+                            method: credential.method,
+                            retriesAfterOutput: false,
+                            beginAttempt: {},
+                            yield: {
+                                yielded.set()
+                                continuation.yield($0)
+                            }
+                        )
+                    }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -130,18 +250,22 @@ public struct OpenAIResponsesClient: LLMClient {
         }
     }
 
-    private func runStream(_ request: TextStreamRequest, yield: (String) -> Void) async throws {
-        let key = try await apiKey()
-        let urlRequest = makeURLRequest(
-            body: try Self.streamBody(request),
-            key: key,
-            timeoutInterval: request.idleTimeout.seconds,
-            streaming: true
-        )
+    /// SSE を読み、差分を `yield` に渡す。`response.completed` で正常に終わる。
+    /// - Parameters:
+    ///   - retriesAfterOutput: 差分を受けた後でも通信エラーなら再試行してよいか（差分を外に出さない場合だけ true）
+    ///   - beginAttempt: 各回の最初に呼ぶ（集めた差分を捨てるため）
+    private func runStream(
+        _ urlRequest: URLRequest,
+        method: AuthMethod,
+        retriesAfterOutput: Bool,
+        beginAttempt: () -> Void,
+        yield: (String) -> Void
+    ) async throws {
         var attempt = 0
         var hasYielded = false
         while true {
             try Task.checkCancellation()
+            beginAttempt()
             let delay: Duration
             do {
                 let (bytes, response) = try await session.bytes(for: urlRequest)
@@ -153,8 +277,7 @@ public struct OpenAIResponsesClient: LLMClient {
                         body.append(byte)
                         if body.count >= Self.maxErrorBodyBytes { break }
                     }
-                    let error = Self.error(status: http.statusCode, body: body)
-                    if error == .authentication { await onAuthenticationFailure?() }
+                    let error = Self.error(status: http.statusCode, body: body, method: method)
                     guard attempt < Self.maxRetries, let wait = Self.retryDelay(for: error, attempt: attempt, http: http) else {
                         throw error
                     }
@@ -189,8 +312,7 @@ public struct OpenAIResponsesClient: LLMClient {
             } catch let error as URLError {
                 if error.code == .cancelled || Task.isCancelled { throw CancellationError() }
                 let mapped = Self.map(error)
-                // 差分を渡し始めた後に再試行すると、同じ文が重複するので再試行しない。
-                guard !hasYielded, attempt < Self.maxRetries, Self.isTransient(error) else {
+                guard retriesAfterOutput || !hasYielded, attempt < Self.maxRetries, Self.isTransient(error) else {
                     throw mapped
                 }
                 delay = Self.backoff(attempt: attempt)
@@ -201,12 +323,36 @@ public struct OpenAIResponsesClient: LLMClient {
         }
     }
 
+    // MARK: - モデル一覧
+
+    /// ChatGPT のアカウントで使えるモデル（`GET /v1/models` の `models` のうち `visibility == "list"`）の `slug`。
+    /// 接続方法が API キーなら nil（DESIGN.md §4.11。接続テストの補助にだけ使う）
+    public func chatGPTModelSlugs() async throws -> [String]? {
+        let credential = try await credentials.credential()
+        guard credential.method == .chatGPTPlan else { return nil }
+        let url = endpoint.deletingLastPathComponent().appending(path: "models")
+        return try await withCredentialRecovery(first: credential, model: nil) { credential, _ in
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+            request.httpMethod = "GET"
+            request.setValue("Bearer \(credential.bearerValue)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            let data = try await send(request, method: credential.method)
+            guard let list = try? JSONDecoder().decode(ModelList.self, from: data) else { throw LLMError.invalidOutput }
+            return (list.models ?? []).compactMap { $0.visibility == "list" ? $0.slug : nil }
+        }
+    }
+
     // MARK: - リクエスト
 
-    private func makeURLRequest(body: Data, key: String, timeoutInterval: TimeInterval, streaming: Bool) -> URLRequest {
+    private func makeURLRequest(
+        body: Data,
+        credential: LLMCredential,
+        timeoutInterval: TimeInterval,
+        streaming: Bool
+    ) -> URLRequest {
         var request = URLRequest(url: endpoint, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeoutInterval)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(credential.bearerValue)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(streaming ? "text/event-stream" : "application/json", forHTTPHeaderField: "Accept")
         request.httpBody = body
@@ -214,22 +360,26 @@ public struct OpenAIResponsesClient: LLMClient {
     }
 
     /// 構造化出力のボディ。スキーマは受け取ったバイト列をそのまま埋め込み、キーの順序を保つ。
-    static func structuredBody(_ request: StructuredOutputRequest) throws -> Data {
+    static func structuredBody(_ request: StructuredOutputRequest, stream: Bool = false, includeReasoning: Bool = true) throws -> Data {
         var body = Data("{".utf8)
         try appendCommonFields(to: &body, model: request.model, instructions: request.instructions,
-                               input: request.input, reasoningEffort: request.reasoningEffort)
+                               input: request.input, reasoningEffort: includeReasoning ? request.reasoningEffort : nil)
         body.append(Data(#","text":{"format":{"type":"json_schema","name":"#.utf8))
         body.append(try encode(request.schemaName))
         body.append(Data(#","strict":true,"schema":"#.utf8))
         body.append(request.schema)
-        body.append(Data("}}}".utf8))
+        body.append(Data("}}".utf8))
+        if stream {
+            body.append(Data(#","stream":true"#.utf8))
+        }
+        body.append(Data("}".utf8))
         return body
     }
 
-    static func streamBody(_ request: TextStreamRequest) throws -> Data {
+    static func streamBody(_ request: TextStreamRequest, includeReasoning: Bool = true) throws -> Data {
         var body = Data("{".utf8)
         try appendCommonFields(to: &body, model: request.model, instructions: request.instructions,
-                               input: request.input, reasoningEffort: request.reasoningEffort)
+                               input: request.input, reasoningEffort: includeReasoning ? request.reasoningEffort : nil)
         body.append(Data(#","stream":true}"#.utf8))
         return body
     }
@@ -241,8 +391,10 @@ public struct OpenAIResponsesClient: LLMClient {
         body.append(try encode(model))
         body.append(Data(#","instructions":"#.utf8))
         body.append(try encode(instructions))
-        body.append(Data(#","input":"#.utf8))
+        // ChatGPT のプランの利用枠は input を配列でしか受け付けないので、どちらの方式でも配列にする（DESIGN.md §4.11）。
+        body.append(Data(#","input":[{"role":"user","content":"#.utf8))
         body.append(try encode(input))
+        body.append(Data("}]".utf8))
         // 応答を OpenAI 側に保存させない。
         body.append(Data(#","store":false"#.utf8))
         if let reasoningEffort, !reasoningEffort.isEmpty {
@@ -280,6 +432,11 @@ public struct OpenAIResponsesClient: LLMClient {
                 }
             }
         }
+        return try validatedJSON(text)
+    }
+
+    /// 出力テキストが空でなく、JSON として読めることを確かめる。
+    static func validatedJSON(_ text: String) throws -> Data {
         let output = Data(text.utf8)
         guard !text.isEmpty, (try? JSONSerialization.jsonObject(with: output)) != nil else {
             throw LLMError.invalidOutput
@@ -287,21 +444,28 @@ public struct OpenAIResponsesClient: LLMClient {
         return output
     }
 
-    /// 2xx 以外の応答を `LLMError` にする。本文は `{"error": {"message", "type", "code", "param"}}` を想定する。
-    static func error(status: Int, body: Data) -> LLMError {
+    /// 2xx 以外の応答を `LLMError` にする。
+    ///
+    /// 本文は `{"error": {"message", "type", "code", "param"}}` を想定する。ChatGPT のプランの利用枠では、
+    /// ストリームが始まる前の失敗の本文が `{"detail": "…"}` のこともある（文は診断用で、決まったコードではない）。
+    static func error(status: Int, body: Data, method: AuthMethod = .apiKey) -> LLMError {
         let detail = (try? JSONDecoder().decode(ErrorEnvelope.self, from: body))?.error
+        if let mapped = LLMError.chatGPTPlanError(code: detail?.code, message: detail?.message, param: detail?.param) {
+            return mapped
+        }
+        let message = detail?.message ?? (try? JSONDecoder().decode(DetailEnvelope.self, from: body))?.detail
         switch status {
         case 401:
-            // 応答の文にはキーの一部が含まれるので使わない。
-            return .authentication
+            // API キーの場合、応答の文にはキーの一部が含まれるので使わない。
+            return method == .chatGPTPlan ? .chatGPTUnauthorized : .authentication
         case 403:
-            return .permissionDenied(message: detail?.message)
+            return .permissionDenied(message: message)
         case 429:
             return detail?.code == "insufficient_quota" ? .quotaExceeded : .rateLimited
         case 500...599:
             return .server(status: status)
         default:
-            return .badRequest(status: status, code: detail?.code, message: detail?.message)
+            return .badRequest(status: status, code: detail?.code, message: message)
         }
     }
 
@@ -327,7 +491,7 @@ public struct OpenAIResponsesClient: LLMClient {
     /// 再試行するなら待つ時間を、しないなら nil を返す。
     static func retryDelay(for error: LLMError, attempt: Int, http: HTTPURLResponse) -> Duration? {
         switch error {
-        case .rateLimited, .server:
+        case .rateLimited, .server, .planUsageUnavailable:
             if let header = http.value(forHTTPHeaderField: "Retry-After") {
                 guard let seconds = retryAfterSeconds(header), seconds <= maxRetryAfter else { return nil }
                 return .milliseconds(Int(max(seconds, 0) * 1000))
@@ -388,6 +552,77 @@ public struct OpenAIResponsesClient: LLMClient {
 
 struct ErrorEnvelope: Decodable {
     let error: APIErrorDetail?
+}
+
+/// ChatGPT のプランの利用枠で、ストリームが始まる前の失敗の本文（`{"detail": "…"}`）。
+struct DetailEnvelope: Decodable {
+    let detail: String?
+}
+
+/// `GET /v1/models`（ChatGPT のプランの利用枠）の応答。`models` 配列（API キーのときの `data` とは違う）
+struct ModelList: Decodable {
+    struct Model: Decodable {
+        let slug: String?
+        let visibility: String?
+    }
+
+    let models: [Model]?
+}
+
+/// ChatGPT のプランの利用枠で `reasoning` を外すモデル（プロセスの間だけ覚える）。
+final class ReasoningFallback: Sendable {
+    private let omitted = Mutex<Set<String>>([])
+
+    func isOmitted(for model: String?) -> Bool {
+        guard let model else { return false }
+        return omitted.withLock { $0.contains(model) }
+    }
+
+    func omit(for model: String?) {
+        guard let model else { return }
+        omitted.withLock { _ = $0.insert(model) }
+    }
+}
+
+/// ストリーミングで、差分を外に出したかどうか。
+final class OutputFlag: Sendable {
+    private let value = Mutex(false)
+
+    var isSet: Bool { value.withLock { $0 } }
+
+    func set() {
+        value.withLock { $0 = true }
+    }
+}
+
+/// ストリームの差分を集める（構造化出力をストリームで受けるとき）。1つのリクエストの中だけで使う。
+final class TextCollector: Sendable {
+    private let buffer = Mutex("")
+
+    var text: String { buffer.withLock { $0 } }
+
+    func append(_ delta: String) {
+        buffer.withLock { $0 += delta }
+    }
+
+    func reset() {
+        buffer.withLock { $0 = "" }
+    }
+}
+
+extension LLMError {
+    /// 401 に当たるエラー（資格情報の担当に知らせて、送り直すかを決める）
+    var isUnauthorized: Bool {
+        switch self {
+        case .authentication, .chatGPTUnauthorized: true
+        default: false
+        }
+    }
+
+    /// `status: failed` や error イベントのエラーを対応付ける（ChatGPT のコードを先に見る）。
+    static func fromFailure(code: String?, message: String?, param: String?) -> LLMError {
+        chatGPTPlanError(code: code, message: message, param: param) ?? .failed(code: code, message: message)
+    }
 }
 
 /// エラーの詳細。想定外の形（code が数値など）でも、読めるフィールドだけ読む。
@@ -475,12 +710,12 @@ struct ResponseBody: Decodable {
     func throwIfNotCompleted() throws {
         switch status {
         case "failed":
-            throw LLMError.failed(code: error?.code, message: error?.message)
+            throw LLMError.fromFailure(code: error?.code, message: error?.message, param: error?.param)
         case "incomplete":
             throw LLMError.incomplete(reason: incompleteDetails?.reason)
         default:
             if let error {
-                throw LLMError.failed(code: error.code, message: error.message)
+                throw LLMError.fromFailure(code: error.code, message: error.message, param: error.param)
             }
         }
     }
@@ -499,11 +734,12 @@ struct StreamEventParser {
         let delta: String?
         let code: String?
         let message: String?
+        let param: String?
         let response: ResponseBody?
         let error: APIErrorDetail?
 
         enum CodingKeys: String, CodingKey {
-            case type, delta, code, message, response, error
+            case type, delta, code, message, param, response, error
         }
 
         init(from decoder: any Decoder) throws {
@@ -512,6 +748,7 @@ struct StreamEventParser {
             delta = try? container.decode(String.self, forKey: .delta)
             code = try? container.decode(String.self, forKey: .code)
             message = try? container.decode(String.self, forKey: .message)
+            param = try? container.decode(String.self, forKey: .param)
             response = try? container.decode(ResponseBody.self, forKey: .response)
             error = try? container.decode(APIErrorDetail.self, forKey: .error)
         }
@@ -531,7 +768,7 @@ struct StreamEventParser {
         }
         // 公式 SDK と同じく、error キーを持つデータは失敗として扱う。
         if event.type == nil, let error = event.error {
-            throw LLMError.failed(code: error.code, message: error.message)
+            throw LLMError.fromFailure(code: error.code, message: error.message, param: error.param)
         }
         switch event.type {
         case "response.output_text.delta":
@@ -547,11 +784,14 @@ struct StreamEventParser {
             try event.response?.throwIfNotCompleted()
             return .completed
         case "response.failed":
-            throw LLMError.failed(code: event.response?.error?.code, message: event.response?.error?.message)
+            // ChatGPT の使用量の上限なども、ストリームの途中にここで届く（DESIGN.md §4.11）。
+            let error = event.response?.error
+            throw LLMError.fromFailure(code: error?.code, message: error?.message, param: error?.param)
         case "response.incomplete":
             throw LLMError.incomplete(reason: event.response?.incompleteDetails?.reason)
         case "error":
-            throw LLMError.failed(code: event.code, message: event.message)
+            throw LLMError.fromFailure(code: event.code ?? event.error?.code, message: event.message ?? event.error?.message,
+                                       param: event.param ?? event.error?.param)
         default:
             return nil
         }

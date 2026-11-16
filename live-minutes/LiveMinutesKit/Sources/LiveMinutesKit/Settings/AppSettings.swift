@@ -27,6 +27,12 @@ public final class AppSettings {
         static let notesMaxInterval = "LiveMinutes.notesMaxInterval"
         static let notesMinInterval = "LiveMinutes.notesMinInterval"
         static let glossary = "LiveMinutes.glossary"
+        static let authMethod = "LiveMinutes.authMethod"
+    }
+
+    /// OpenAI への接続方法（API キーか ChatGPT のプラン。DESIGN.md §4.11）
+    public var authMethod: AuthMethod {
+        didSet { defaults.set(authMethod.rawValue, forKey: Key.authMethod) }
     }
 
     /// ライブ更新用（Luna）のモデルID
@@ -97,6 +103,7 @@ public final class AppSettings {
         notesMaxInterval = defaults.object(forKey: Key.notesMaxInterval) as? TimeInterval ?? Self.defaultNotesMaxInterval
         notesMinInterval = defaults.object(forKey: Key.notesMinInterval) as? TimeInterval ?? Self.defaultNotesMinInterval
         glossary = defaults.stringArray(forKey: Key.glossary) ?? []
+        authMethod = defaults.string(forKey: Key.authMethod).flatMap(AuthMethod.init(rawValue:)) ?? .apiKey
     }
 
     /// リクエストに使うライブ更新用のモデルID（前後の空白を除く）。接続テストと本番で同じ値を使うため、ここからだけ読む

@@ -79,7 +79,11 @@ struct OpenAIClientTests {
         let body = sent.bodyJSON
         #expect(body["model"] as? String == "gpt-6-luna")
         #expect(body["instructions"] as? String == "システムプロンプト")
-        #expect(body["input"] as? String == #"{"new_transcript":[]}"#)
+        // input はユーザーのメッセージ1件の配列（ChatGPT のプランの利用枠に合わせて、どちらの方式でも配列にする）
+        let input = try #require(body["input"] as? [[String: Any]])
+        #expect(input.count == 1)
+        #expect(input.first?["role"] as? String == "user")
+        #expect(input.first?["content"] as? String == #"{"new_transcript":[]}"#)
         #expect(body["store"] as? Bool == false)
         #expect((body["reasoning"] as? [String: Any])?["effort"] as? String == "low")
         #expect(body["stream"] == nil)
@@ -322,7 +326,7 @@ struct OpenAIClientTests {
 
         let body = try #require(StubURLProtocol.requests(for: url).first).bodyJSON
         #expect(body["instructions"] as? String == tricky)
-        #expect(body["input"] as? String == tricky)
+        #expect((body["input"] as? [[String: Any]])?.first?["content"] as? String == tricky)
     }
 
     @Test("応答の未知の項目や想定外の形のフィールドは無視して読む")

@@ -58,6 +58,7 @@
 | [2](docs/tasks/phase-2-session.md) | 録音制御と保存 | 一時停止・停止・保存・書き出しができる |
 | [3](docs/tasks/phase-3-llm-foundation.md) | OpenAI接続とノートの土台 | APIキーを設定し、接続を確認できる |
 | [4](docs/tasks/phase-4-live-notes.md) | ライブ整理 | 会議中に箇条書きが増えていく |
+| [4B](docs/tasks/phase-4b-chatgpt-sign-in.md) | ChatGPT でのログイン（追加） | API キーの代わりに ChatGPT のプランで使える |
 | [5](docs/tasks/phase-5-minutes.md) | 議事録と履歴 | 終了時に議事録ができ、過去の会議を開ける |
 | [6](docs/tasks/phase-6-polish.md) | 仕上げ | エラー表示、用語登録、メニューバー常駐など |
 | [7](docs/tasks/phase-7-system-audio.md) | Mac内音声（将来） | オンライン会議の相手の声も文字になる |

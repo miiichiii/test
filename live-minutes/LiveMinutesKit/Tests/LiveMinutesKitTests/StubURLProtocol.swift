@@ -56,6 +56,11 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         return url
     }
 
+    /// 決めた URL に応答の決め方を登録する（同じ接頭辞の別のパスが要るとき）。
+    static func register(at url: URL, _ handler: @escaping Handler) {
+        entries.withLock { $0[url.absoluteString] = Entry(handler: handler) }
+    }
+
     static func requests(for url: URL) -> [RecordedRequest] {
         entries.withLock { $0[url.absoluteString]?.requests ?? [] }
     }

@@ -248,8 +248,9 @@ public final class SessionController {
         Task { await engine.retryNow() }
     }
 
-    /// API キーを保存・削除したときに呼ぶ。止まっていた送信を再開し、会議中にキーが入ったらその時点からライブ更新を始める。
-    public func apiKeyDidChange() async {
+    /// 資格情報が変わったとき（API キーの保存・削除、ChatGPT のログイン・ログアウト、接続方法の変更）に呼ぶ。
+    /// 止まっていた送信を再開し、会議中に設定されたらその時点からライブ更新を始める。
+    public func credentialsDidChange() async {
         if let engine = notesEngine {
             await engine.retryNow()
             return

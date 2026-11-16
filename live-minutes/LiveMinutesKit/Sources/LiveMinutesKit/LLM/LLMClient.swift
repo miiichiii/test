@@ -104,6 +104,27 @@ public enum LLMError: Error, Equatable, Sendable {
     /// API が失敗を返した（`status: failed` やストリーミングの error イベント）
     case failed(code: String?, message: String?)
 
+    // MARK: ChatGPT のプランの利用枠（DESIGN.md §4.11）
+
+    /// ChatGPT にログインしていない、またはログインし直しが必要
+    case chatGPTSignInRequired
+    /// ログインはしているが、プランの利用（`chatgpt.tokens.use.direct`）が許可されていない
+    case chatGPTPlanNotGranted
+    /// キーチェーンからログインの情報を読めない（アクセスを拒否された、など）
+    case chatGPTCredentialUnavailable
+    /// トークンを更新したのに、また 401 だった
+    case chatGPTUnauthorized
+    /// 設定の誤り（`chatpass_v2_*`、`subscription_sharing_route_not_supported`、`invalid_client`）
+    case chatGPTRejected(code: String?)
+    /// 使用量の上限（`subscription_sharing_usage_limit_exceeded`）。プランかアプリごとの上限
+    case usageLimitReached
+    /// 使用量を確かめられなかった（`subscription_sharing_usage_unavailable` など。一時的）
+    case planUsageUnavailable
+    /// プランの対象外（`subscription_sharing_user_not_eligible`）
+    case planNotEligible(message: String?)
+    /// プランの利用枠では使えないパラメータ（`subscription_sharing_unsupported_capability`）
+    case unsupportedCapability(param: String?)
+
     /// ログ用の要約。会議の内容やキーを含まない値だけを出す。
     public var logSummary: String {
         switch self {
@@ -121,8 +142,44 @@ public enum LLMError: Error, Equatable, Sendable {
         case .incomplete(let reason): "incomplete(\(reason ?? "-"))"
         case .invalidOutput: "invalidOutput"
         case .failed(let code, _): "failed(code: \(code ?? "-"))"
+        case .chatGPTSignInRequired: "chatGPTSignInRequired"
+        case .chatGPTPlanNotGranted: "chatGPTPlanNotGranted"
+        case .chatGPTCredentialUnavailable: "chatGPTCredentialUnavailable"
+        case .chatGPTUnauthorized: "chatGPTUnauthorized"
+        case .chatGPTRejected(let code): "chatGPTRejected(code: \(code ?? "-"))"
+        case .usageLimitReached: "usageLimitReached"
+        case .planUsageUnavailable: "planUsageUnavailable"
+        case .planNotEligible: "planNotEligible"
+        case .unsupportedCapability(let param): "unsupportedCapability(param: \(param ?? "-"))"
         }
     }
+
+    /// ChatGPT のエラーコード（`subscription_sharing_*` など）を対応付ける。該当しなければ nil
+    /// （DESIGN.md §4.11 のエラーの表。HTTP のエラー応答・`response.failed`・`error` イベントで共有する）
+    static func chatGPTPlanError(code: String?, message: String?, param: String?) -> LLMError? {
+        switch code {
+        case "subscription_sharing_usage_limit_exceeded":
+            .usageLimitReached
+        case "subscription_sharing_usage_unavailable", "subscription_sharing_user_unavailable":
+            .planUsageUnavailable
+        case "subscription_sharing_user_not_eligible":
+            .planNotEligible(message: message)
+        case "subscription_sharing_unsupported_capability":
+            .unsupportedCapability(param: param)
+        case "subscription_sharing_invalid_user":
+            .chatGPTUnauthorized
+        case "chatpass_v2_scope_not_authorized", "chatpass_v2_invalid_authorization_context",
+             "subscription_sharing_route_not_supported":
+            .chatGPTRejected(code: code)
+        default:
+            nil
+        }
+    }
+}
+
+/// ChatGPT の使用量の画面（UI/UX guidelines の「Manage usage」のリンク先。DESIGN.md §8 #11）
+public enum ChatGPTLinks {
+    public static let usage: URL? = URL(string: "https://chatgpt.com/settings/usage")
 }
 
 extension LLMError: LocalizedError {
@@ -160,6 +217,24 @@ extension LLMError: LocalizedError {
             "OpenAI の応答を読み取れませんでした。"
         case .failed(_, let message):
             withDetail("OpenAI での処理に失敗しました。", message)
+        case .chatGPTSignInRequired:
+            "ChatGPT へのログインが必要です。設定画面で「ChatGPT で続ける」からログインしてください。"
+        case .chatGPTPlanNotGranted:
+            "ChatGPT のプランの利用が許可されていません。もう一度ログインして許可するか、接続方法を API キーにしてください。"
+        case .chatGPTCredentialUnavailable:
+            "キーチェーンから ChatGPT のログイン情報を読めませんでした。アクセスを許可するか、ログインし直してください。"
+        case .chatGPTUnauthorized:
+            "ChatGPT のログインが受け付けられませんでした。再試行するか、設定画面でログインし直してください。"
+        case .chatGPTRejected(let code):
+            withDetail("ChatGPT のプランでの利用が受け付けられませんでした（設定の誤り）。", code)
+        case .usageLimitReached:
+            "ChatGPT の使用量の上限に達しました。プランかこのアプリの上限を、ChatGPT の設定（使用量）で確認してください。"
+        case .planUsageUnavailable:
+            "ChatGPT のプランの使用量を確認できませんでした。しばらく待ってから試してください。"
+        case .planNotEligible(let message):
+            withDetail("この ChatGPT のアカウントでは、プランの利用枠を使えません。", message)
+        case .unsupportedCapability(let param):
+            withDetail("ChatGPT のプランの利用枠では使えない指定が含まれていました。", param)
         }
     }
 

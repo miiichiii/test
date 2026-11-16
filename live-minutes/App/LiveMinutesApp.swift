@@ -20,9 +20,10 @@ struct LiveMinutesApp: App {
                 settings: appDelegate.settings,
                 secretStore: appDelegate.secretStore,
                 connectionTest: appDelegate.connectionTest,
+                chatGPTAccount: appDelegate.chatGPTAccount,
                 loadLocales: { await AppleSpeechEngine.supportedLocaleIdentifiers() },
-                onAPIKeyChange: { [controller = appDelegate.controller] in
-                    Task { await controller.apiKeyDidChange() }
+                onCredentialsChange: { [controller = appDelegate.controller] in
+                    Task { await controller.credentialsDidChange() }
                 }
             )
         }
@@ -35,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let secretStore: any SecretStore
     let controller: SessionController
     let connectionTest: ConnectionTest
+    let chatGPTAccount: ChatGPTAccount
 
     /// 最終確定（最大10秒）と保存を待つ上限。超えたら保存を諦めて終了する。
     private static let terminationTimeout: Duration = .seconds(12)
@@ -45,10 +47,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settings = AppSettings()
         // API キーは起動時には読まず、最初に必要になったときにキーチェーンから読んでメモリに持つ。
         let secretStore = CachingSecretStore(base: KeychainStore())
-        let llmClient = OpenAIResponsesClient(
-            apiKey: { try await secretStore.readAPIKey() },
-            onAuthenticationFailure: { await secretStore.invalidate() }
+        // ChatGPT のログインの情報も、起動時には読まず、最初に必要になったときにキーチェーンから読む（DESIGN.md §4.11）。
+        let chatGPTAuth = ChatGPTAuth()
+        let credentials = CredentialRouter(
+            method: { settings.authMethod },
+            apiKey: APIKeyCredentialProvider(
+                read: { try await secretStore.readAPIKey() },
+                invalidate: { await secretStore.invalidate() }
+            ),
+            chatGPT: chatGPTAuth
         )
+        let llmClient = OpenAIResponsesClient(credentials: credentials)
         let repository = SessionRepository(rootDirectory: SessionRepository.defaultRootDirectory)
         let notesFactory = LiveNotesFactory(
             settings: settings,
@@ -58,8 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         self.settings = settings
         self.secretStore = secretStore
-        self.connectionTest = ConnectionTest(client: llmClient)
-        self.controller = SessionController(
+        self.connectionTest = ConnectionTest(client: llmClient, modelCatalog: { try await llmClient.chatGPTModelSlugs() })
+        let controller = SessionController(
             engine: AppleSpeechEngine(),
             source: MicrophoneSource(),
             permission: SystemMicrophonePermission(),
@@ -67,6 +76,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             clock: SystemSessionClock(),
             recognitionLocale: { settings.recognitionLocale },
             notesEngineFactory: { meta, store in await notesFactory.makeEngine(for: meta, store: store) }
+        )
+        self.controller = controller
+        self.chatGPTAccount = ChatGPTAccount(
+            auth: chatGPTAuth,
+            openURL: { NSWorkspace.shared.open($0) },
+            onCredentialsChange: { Task { await controller.credentialsDidChange() } }
         )
         super.init()
     }

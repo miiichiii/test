@@ -16,14 +16,19 @@ public final class ConnectionTest {
     }
 
     public private(set) var status: Status = .idle
+    /// ChatGPT のプランのときの補足（設定したモデルIDが、アカウントで使えるモデルの一覧にあるか）。API キーのときは nil
+    public private(set) var modelListNote: String?
 
     private let client: any LLMClient
+    /// ChatGPT のアカウントで使えるモデルの一覧（API キーのときは nil を返す）
+    private let modelCatalog: (@Sendable () async throws -> [String]?)?
     private static let logger = Logger(subsystem: LiveMinutesInfo.logSubsystem, category: "LLM")
 
     static let instructions = "これは接続テストです。ノートへの操作はありません。ops を空の配列にして返してください。"
 
-    public init(client: any LLMClient) {
+    public init(client: any LLMClient, modelCatalog: (@Sendable () async throws -> [String]?)? = nil) {
         self.client = client
+        self.modelCatalog = modelCatalog
     }
 
     /// - Parameters:
@@ -37,6 +42,7 @@ public final class ConnectionTest {
             return
         }
         status = .running
+        modelListNote = nil
         do {
             let request = StructuredOutputRequest(
                 model: model,
@@ -51,6 +57,7 @@ public final class ConnectionTest {
             // 応答がアプリの型として読めることまで確かめる。
             _ = try NotesOpsResponse.decode(from: output)
             status = .succeeded
+            await checkModelList(model: model)
         } catch let error as LLMError {
             Self.logger.notice("接続テストに失敗: \(error.logSummary, privacy: .public)")
             status = .failed(error.localizedDescription)
@@ -68,5 +75,21 @@ public final class ConnectionTest {
     public func reset() {
         guard status != .running else { return }
         status = .idle
+        modelListNote = nil
+    }
+
+    /// 接続テストの補助。一覧の取得や読み取りに失敗しても、テスト全体は失敗にしない（DESIGN.md §4.11）。
+    private func checkModelList(model: String) async {
+        guard let modelCatalog else { return }
+        do {
+            guard let slugs = try await modelCatalog(), status == .succeeded else { return }
+            modelListNote = slugs.contains(model)
+                ? "このモデルは、ChatGPT のアカウントで使えるモデルの一覧にあります。"
+                : "このモデルは、ChatGPT のアカウントで使えるモデルの一覧にありません（一覧: \(slugs.joined(separator: "、"))）。"
+        } catch {
+            Self.logger.notice("モデルの一覧を取得できない: \(String(describing: type(of: error)), privacy: .public)")
+            guard status == .succeeded else { return }
+            modelListNote = "ChatGPT のアカウントで使えるモデルの一覧は、取得できませんでした。"
+        }
     }
 }

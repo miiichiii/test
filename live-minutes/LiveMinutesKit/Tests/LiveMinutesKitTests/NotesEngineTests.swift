@@ -170,6 +170,29 @@ struct NotesEngineTests {
         #expect(await engine.isHalted == false)
     }
 
+    @Test("ChatGPT のプランのエラー: 使用量の上限や要ログインは止め、使用量を確かめられないだけなら送り直す", arguments: [
+        (LLMError.usageLimitReached, true),
+        (.chatGPTSignInRequired, true),
+        (.chatGPTPlanNotGranted, true),
+        (.planNotEligible(message: nil), true),
+        (.unsupportedCapability(param: "text"), true),
+        (.chatGPTUnauthorized, true),
+        (.planUsageUnavailable, false),
+    ])
+    func chatGPTPlanFailureKinds(error: LLMError, halts: Bool) async throws {
+        let engine = try makeEngine()
+        await engine.add(segment(characters: 130))
+        clock.advance(by: 8)
+        await waitUntil { await requestCount() == 1 }
+        await client.respond(0, error: error)
+        await waitUntil { await !engine.isInFlight }
+
+        #expect(await engine.isHalted == halts)
+        #expect(store.status == .failed(message: error.localizedDescription, needsRetry: halts))
+        // どちらの場合も、発言は捨てない。
+        #expect(await engine.pending.count == 1)
+    }
+
     @Test("止まっている間に一時停止をオン・オフしても、エラーと再試行の表示に戻る")
     func haltSurvivesPauseToggle() async throws {
         let engine = try makeEngine()
