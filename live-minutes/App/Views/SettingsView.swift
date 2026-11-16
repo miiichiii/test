@@ -8,6 +8,9 @@ struct SettingsView: View {
     let secretStore: any SecretStore
     let connectionTest: ConnectionTest
     let chatGPTAccount: ChatGPTAccount
+    let inputDevices: AudioInputDeviceList
+    /// マイクを選び直したとき（UID。空なら Mac の設定のマイク）。録音中ならすぐに切り替える
+    let onInputDeviceChange: (String) -> Void
     /// 認識言語の候補（BCP 47 の識別子）を読む
     let loadLocales: () async -> [String]
     /// 資格情報が変わったとき（API キーの保存・削除、接続方法の変更。会議中なら、その時点からノートの更新を始める・再開する）
@@ -62,6 +65,18 @@ struct SettingsView: View {
             }
 
             Section("文字起こし") {
+                Picker("マイク", selection: Binding(
+                    get: { settings.inputDeviceUID },
+                    set: { selectInputDevice($0) }
+                )) {
+                    ForEach(inputDevices.options(savedUID: settings.inputDeviceUID, savedName: settings.inputDeviceName)) { option in
+                        Text(option.label).tag(option.tag)
+                    }
+                }
+                Text("録音中に変えると、すぐに切り替えます。選んだマイクがつながっていないときは、Mac の設定のマイクを使います。AirPods をマイクにすると、再生の音質が下がることがあります（macOS の仕様）。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Picker("認識言語", selection: $settings.recognitionLocaleIdentifier) {
                     ForEach(localeOptions, id: \.self) { identifier in
                         Text(displayName(identifier)).tag(identifier)
@@ -76,6 +91,15 @@ struct SettingsView: View {
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: settings.liveModelID) { connectionTest.reset() }
+        // 設定画面を開いている間だけ、マイクの一覧の変化を聞く。
+        .task { await inputDevices.observe() }
+        // 選んでいるマイクの名前が変わったら、保存している名前も合わせる（つながっていないときの表示用）。
+        .onChange(of: inputDevices.devices) {
+            if let device = inputDevices.devices.first(where: { $0.uid == settings.inputDeviceUID }),
+               device.name != settings.inputDeviceName {
+                settings.inputDeviceName = device.name
+            }
+        }
         .onChange(of: settings.authMethod) {
             connectionTest.reset()
             onCredentialsChange()
@@ -100,6 +124,14 @@ struct SettingsView: View {
             hasAPIKey = await secretStore.hasAPIKey()
             localeIdentifiers = await loadLocales()
         }
+    }
+
+    /// マイクを選ぶ。UID と名前を同時に保存し、マイクに伝える
+    private func selectInputDevice(_ uid: String) {
+        guard uid != settings.inputDeviceUID else { return }
+        settings.inputDeviceUID = uid
+        settings.inputDeviceName = inputDevices.devices.first(where: { $0.uid == uid })?.name ?? ""
+        onInputDeviceChange(uid)
     }
 
     /// API キーの入力・保存・削除

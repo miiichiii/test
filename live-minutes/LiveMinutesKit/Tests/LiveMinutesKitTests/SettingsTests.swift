@@ -28,6 +28,19 @@ struct AppSettingsTests {
         #expect(settings.authMethod == .apiKey)
     }
 
+    @Test("マイクの UID と名前は UserDefaults に保存され、既定は空（Mac の設定に従う）")
+    func persistsInputDevice() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.inputDeviceUID.isEmpty)
+        settings.inputDeviceUID = "usb-mic-uid"
+        settings.inputDeviceName = "USB マイク"
+        let reloaded = AppSettings(defaults: defaults)
+        #expect(reloaded.inputDeviceUID == "usb-mic-uid")
+        #expect(reloaded.inputDeviceName == "USB マイク")
+    }
+
     @Test("接続方法は UserDefaults に保存され、作り直しても残る")
     func persistsAuthMethod() {
         let (defaults, suite) = makeDefaults()

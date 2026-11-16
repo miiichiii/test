@@ -107,6 +107,22 @@ Phase 7 でシステム音声用の実装を足せるよう、文字起こし側
 - `installTap(onBus:bufferSize:format:block:)` は macOS 27 で非推奨になり、エラーを返す版が追加された。デプロイメントターゲットが macOS 26 なので旧版を使う（警告は出ない）。ターゲットを 27 に上げるときに置き換える
 - 入力レベル（メーター表示用）はtapのバッファ（変換前）から計算する
 
+#### マイクの選択（Phase 4C）
+
+設定画面で、このアプリで使うマイクを選べるようにする。既定は「Mac の設定に従う」（今までどおり、システム設定の「サウンド」→「入力」で選ばれているもの）。
+
+- **一覧**: Core Audio の `kAudioHardwarePropertyDevices` で全デバイスを取り、入力スコープの `kAudioDevicePropertyStreamConfiguration` のチャンネル数の合計が 0 より大きいものだけを残す（ストリームはあるが 0ch のものも外せる）。名前は `kAudioObjectPropertyName`、識別には `kAudioDevicePropertyDeviceUID` を使う。並びは Core Audio が返す順のまま。仮想デバイスや集約デバイス（BlackHole、会議アプリの仮想マイクなど）も外さない（システム設定と同じ並びにするため）
+- **一覧の変化**: `AudioObjectAddPropertyListenerBlock` で、システムの `kAudioHardwarePropertyDevices` と `kAudioHardwarePropertyDefaultInputDevice` の変化を聞き、`AsyncStream<Void>`（最新1件だけ溜める）に流す。呼ぶたびに新しいリスナーとストリームを作り、ストリームが終わったら外す。リスナーには専用の直列キューを渡し、追加と削除に同じブロックの値を渡す（クロージャを2回書くと別のブロックになり、外れない）。ブロックの中では yield だけを行う
+- **保存**: UID と、表示用の名前を `AppSettings` に保存する（`UserDefaults`）。UID は抜き差ししても変わらないので、次につないだときも同じマイクを選べる。`AudioDeviceID`（数値）は起動のたびに変わりうるので保存しない。一覧にその UID が見えるたびに名前を更新する（名前の変更に追従する）。名前での代わりの一致はしない（シリアル番号のない同じ型の USB マイクは、差すポートで UID が変わり「未接続」になることがある。誤って別のマイクを選ばないための既知の制限）
+- **使い方**: `MicrophoneSource` は `AVAudioEngine` を作るたびに、選ばれた UID に当たるデバイスを探し、見つかれば `engine.inputNode.auAudioUnit.setDeviceID(_:)` で入力に設定してから、入力形式を読み、tap を付ける（SDK の `AUAudioUnit.h` で macOS 用に用意されている。`kAudioOutputUnitProperty_CurrentDevice` と行き先は同じで、Swift では throws で扱いやすい）。設定より前に `inputNode` の形式を読まない（古い形式が残ることがあるため）。設定した後は、入力側（`inputFormat(forBus: 0)`）と出力側（`outputFormat(forBus: 0)`）のレートとチャンネル数が合うかを確かめる（合わないまま tap を付けると、捕まえられない例外になるか、`TapProcessor` が全部捨てる）
+- **出力に触らない**: `mainMixerNode` と `outputNode` には触らない。voice processing も有効にしない（入力は独立した I/O ユニットのまま、出力の装置に影響させないため）
+- **失敗したとき**: 選んだマイクがつながっていない、`setDeviceID` が失敗した、設定後の形式が 0Hz / 0ch か入出力で食い違う、変換器を作れない、`engine.start()` が失敗した、のどれでも、録音を止めずに、新しい `AVAudioEngine` を作って Mac の設定のマイクで録音する（同じエンジンで装置を戻さない）。理由はログに残す。既定のマイクでの動作は、今までと変えない
+- **録音中の追従**: 録音中は、デバイスの一覧の変化を常に聞く。変化のたびに「今使うべきマイク」を決め直し、「今のエンジンが使っているマイク」と違えば作り直す（選んだマイクを抜いたときに既定へ移る、つなぎ直したら戻る、の両方をこれで行う。選んだマイクが消えたときに `AVAudioEngineConfigurationChange` が来る保証はないため）。同じなら何もしない
+- **作り直しのループを防ぐ**: `setDeviceID` 自体が構成の変更の通知を出すかは分からないので、作り直しが10秒の間に5回を超えたら、選んだマイクをやめて Mac の設定のマイクに落とし、ログに残す（設定画面で選び直すまで）。AirPods は使い始めにレートが変わって1回作り直すのが普通なので、1回の作り直しは異常として扱わない
+- **選び直し**: 録音中なら、今の作り直しの経路（250ms 待って直列に処理する）でエンジンを作り直す。録音していないときは値を覚えるだけにする（エンジンを作るとマイクのインジケータが点くため）
+- **画面**: 設定画面の「文字起こし」の節に「マイク」の選択欄を置く。項目は「Mac の設定に従う（今の名前）」と、入力を持つデバイスの名前。保存してあるマイクがつながっていなければ「（未接続）名前」として残し、選ばれたままにする。一覧は、設定画面を開いている間、デバイスのつなぎ外しに合わせて更新する
+- AirPods をマイクに選ぶと、再生の音質が下がる（Bluetooth のハンズフリーの方式に切り替わる。macOS の仕様）。設定画面に一言書く
+
 ### 4.2 Transcription
 
 - `TranscriptionEngine`（protocol）: 次の3つを持つ
@@ -623,3 +639,4 @@ API キーでの接続テスト（§8 #5）を先に済ませておくと、Chat
 | 10 | `gpt-6-luna` と `gpt-6.1-sol` が ChatGPT プランで使えるか（`GET /v1/models` に出るか） | Phase 4B | `gpt-6-luna` は確認済み（2026-11-16、人による確認。接続テストで「一覧にあります」と表示され、リクエストも成功した）。`gpt-6.1-sol` は未確認（議事録の仕上げを作る Phase 5 で確かめる） |
 | 11 | 「使用量を管理」のリンク先（ChatGPT の設定の使用量の画面）の URL | Phase 4B | 文書で確認（2026-11-16、UI/UX guidelines）。`https://chatgpt.com/settings/usage`。実際にその画面が開くかは、人による確認で見る |
 | 12 | 初回のログイン（動的登録）で `redirect_uri` のポートを固定する必要があるか。文書には「2回目以降は変わってよい」とだけある | Phase 4B | 未確認（原文は「from initial registration onward」「Later sign-ins may use another available port」）。1455 が使用中のときの初回のログインで確かめる |
+| 13 | `inputNode.auAudioUnit.setDeviceID(_:)` で、`AVAudioEngine` の入力だけを既定と別のマイクにできるか（出力側の装置との組み合わせで失敗しないか）。`setDeviceID` 自体が `AVAudioEngineConfigurationChange` を出すか。選んだ装置の抜き差しで通知が来るか。マイクの許可の前でも一覧を取れるか | Phase 4C | 未確認。ヘッダで API があることは確かめた。実機で確かめる。`setDeviceID` で駄目なら `kAudioOutputUnitProperty_CurrentDevice` を試す |

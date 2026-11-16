@@ -7,6 +7,8 @@ import os
 /// - tap のコールバックでは「変換」「レベル計算」「ストリームへの受け渡し」だけを行う（`TapProcessor`）
 /// - 入力デバイスが変わると（`AVAudioEngineConfigurationChange`）、AVAudioEngine ごと作り直して録音を続ける。
 ///   音声のストリームは切らない
+/// - マイクを選べる（DESIGN.md §4.1「マイクの選択」）。選んだマイクがなければ Mac の設定のマイクで録音し、
+///   録音中はデバイスの一覧の変化を聞いて、使うべきマイクが変わったら作り直す
 public actor MicrophoneSource: AudioSource {
     public nonisolated let levels: AsyncStream<Float>
     private let levelContinuation: AsyncStream<Float>.Continuation
@@ -22,10 +24,31 @@ public actor MicrophoneSource: AudioSource {
     private var configurationSignal: AsyncStream<Int>.Continuation?
     private var configurationTask: Task<Void, Never>?
 
+    /// 選ばれたマイクの UID。nil なら Mac の設定のマイク
+    private var preferredUID: String?
+    /// 今のエンジンが使っているマイクの UID。nil なら Mac の設定のマイク
+    private var activeUID: String?
+    /// 作り直しが続きすぎたので、選んだマイクをやめている（選び直すまで）
+    private var isPreferredSuppressed = false
+    private var rebuildLimiter = RebuildLimiter()
+    /// 録音中に、デバイスの一覧の変化を聞く Task
+    private var deviceChangesTask: Task<Void, Never>?
+
     private static let logger = Logger(subsystem: LiveMinutesInfo.logSubsystem, category: "Audio")
 
-    public init() {
+    /// - Parameter preferredDeviceUID: 使うマイクの UID。nil か空なら Mac の設定のマイク
+    public init(preferredDeviceUID: String? = nil) {
         (levels, levelContinuation) = AsyncStream.makeStream(of: Float.self, bufferingPolicy: .bufferingNewest(1))
+        preferredUID = Self.normalized(preferredDeviceUID)
+    }
+
+    /// 使うマイクを選び直す。録音中ならすぐに切り替え、録音していなければ覚えるだけにする
+    /// （エンジンを作るとマイクのインジケータが点くため）。
+    public func setPreferredDevice(uid: String?) {
+        preferredUID = Self.normalized(uid)
+        isPreferredSuppressed = false
+        rebuildLimiter.reset()
+        requestRebuildIfNeeded()
     }
 
     public func start(outputFormat: AVAudioFormat) async throws -> AsyncStream<AudioChunk> {
@@ -38,7 +61,7 @@ public actor MicrophoneSource: AudioSource {
         self.configurationSignal = signal
 
         do {
-            try startEngine()
+            try startPreferredEngine()
         } catch {
             chunkContinuation.finish()
             signal.finish()
@@ -55,12 +78,21 @@ public actor MicrophoneSource: AudioSource {
                 await self?.handleConfigurationChange(generation: generation)
             }
         }
+        // 録音中は、デバイスの一覧の変化を常に聞く（選んだマイクが消えたときに通知が来る保証はないため）。
+        let deviceChanges = AudioInputDevices.changes()
+        deviceChangesTask = Task { [weak self] in
+            for await _ in deviceChanges {
+                await self?.requestRebuildIfNeeded()
+            }
+        }
         return chunks
     }
 
     public func stop() async {
         guard isRunning else { return }
         isRunning = false
+        deviceChangesTask?.cancel()
+        deviceChangesTask = nil
         configurationTask?.cancel()
         configurationTask = nil
         configurationSignal?.finish()
@@ -72,17 +104,77 @@ public actor MicrophoneSource: AudioSource {
         levelContinuation.yield(0)
     }
 
+    // MARK: - マイクの選択
+
+    private static func normalized(_ uid: String?) -> String? {
+        guard let uid, !uid.isEmpty else { return nil }
+        return uid
+    }
+
+    /// 今使うべきマイクの UID（つながっていなければ nil）
+    private func targetUID() -> String? {
+        guard preferredUID != nil, !isPreferredSuppressed else { return nil }
+        return InputDeviceSelection.target(
+            preferredUID: preferredUID,
+            availableUIDs: AudioInputDevices.list().map(\.uid),
+            suppressed: isPreferredSuppressed
+        )
+    }
+
+    /// 今使うべきマイクが、今のエンジンのものと違えば作り直しを頼む（同じなら何もしない。ループを防ぐ）。
+    private func requestRebuildIfNeeded() {
+        guard isRunning else { return }
+        guard InputDeviceSelection.needsRebuild(currentUID: activeUID, targetUID: targetUID()) else { return }
+        // 作り直しは、構成の変更の通知と同じ経路で、直列に行う。
+        configurationSignal?.yield(engineGeneration)
+    }
+
     // MARK: - AVAudioEngine
 
-    private func startEngine() throws {
+    /// 選んだマイクでエンジンを作る。失敗したら、新しいエンジンで Mac の設定のマイクを使う（録音を止めない）。
+    private func startPreferredEngine() throws {
+        if let uid = targetUID() {
+            do {
+                try startEngine(deviceUID: uid)
+                return
+            } catch {
+                Self.logger.error("選んだマイクで録音を始められないため、Mac の設定のマイクを使う: \(String(describing: error), privacy: .public)")
+            }
+        }
+        try startEngine(deviceUID: nil)
+    }
+
+    /// - Parameter deviceUID: 使うマイクの UID。nil なら Mac の設定のマイク（今までと同じ動作）
+    private func startEngine(deviceUID: String?) throws {
         guard let outputFormat, let chunkContinuation else { return }
 
         let engine = AVAudioEngine()
+        // 出力側（mainMixerNode・outputNode）には触らない。voice processing も有効にしない。
         let input = engine.inputNode
+        if let deviceUID {
+            guard let deviceID = AudioInputDevices.deviceID(forUID: deviceUID) else {
+                throw DeviceSelectionError.notConnected
+            }
+            // 入力形式を読む前に設定する（設定より前に読むと、古い形式が残ることがある）。
+            do {
+                try input.auAudioUnit.setDeviceID(deviceID)
+            } catch {
+                throw DeviceSelectionError.setDeviceFailed(String(describing: error))
+            }
+        }
         let inputFormat = input.outputFormat(forBus: 0)
         // 0Hz / 0ch のまま installTap すると、Swift で捕まえられない例外になる（AVAudioEngine.h）。
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            throw AudioSourceError.noInputDevice
+            throw deviceUID == nil ? AudioSourceError.noInputDevice : DeviceSelectionError.invalidFormat
+        }
+        if deviceUID != nil {
+            // 選んだマイクでは、装置側と出力側の形式が合うかも確かめる（合わないまま tap を付けると、
+            // 捕まえられない例外になるか、TapProcessor が全部捨てる）。
+            let hardwareFormat = input.inputFormat(forBus: 0)
+            guard hardwareFormat.sampleRate == inputFormat.sampleRate,
+                  hardwareFormat.channelCount == inputFormat.channelCount else {
+                throw DeviceSelectionError.invalidFormat
+            }
         }
 
         let processor = TapProcessor(
@@ -96,6 +188,7 @@ public actor MicrophoneSource: AudioSource {
         input.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat, block: Self.makeTapBlock(processor))
 
         // 開始までの間に来た通知も落とさないよう、observer は engine.start() より前に付ける。
+        // （setDeviceID より後に付けるので、設定そのものの通知は受けない。）
         engineGeneration += 1
         let generation = engineGeneration
         let signal = configurationSignal
@@ -118,6 +211,7 @@ public actor MicrophoneSource: AudioSource {
         }
         configurationObserver = observer
         self.engine = engine
+        activeUID = deviceUID
     }
 
     private func tearDownEngine() {
@@ -129,9 +223,11 @@ public actor MicrophoneSource: AudioSource {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         self.engine = nil
+        activeUID = nil
     }
 
     /// 入力デバイスの変更に追従する。通知が来た時点でエンジンは止まっているので、エンジンごと作り直す。
+    /// マイクの選び直しや、デバイスの一覧の変化による作り直しも、ここを通る。
     /// - Parameter generation: 通知を出したエンジンの番号。今のエンジンのものでなければ無視する
     ///   （作り直しの前に溜まった通知で、作ったばかりのエンジンをもう一度壊さないため）。
     private func handleConfigurationChange(generation: Int) async {
@@ -141,13 +237,19 @@ public actor MicrophoneSource: AudioSource {
         // 待っている間に stop（とその後の start）が走った場合は、新しいエンジンに触らない。
         guard isRunning, !Task.isCancelled, generation == engineGeneration else { return }
 
+        // 作り直しが短い間に続きすぎたら、選んだマイクをやめて Mac の設定のマイクに落とす（ループを防ぐ）。
+        if rebuildLimiter.record(at: .now), preferredUID != nil, !isPreferredSuppressed {
+            isPreferredSuppressed = true
+            Self.logger.error("マイクの作り直しが続いたため、選んだマイクをやめて Mac の設定のマイクを使う")
+        }
+
         tearDownEngine()
         levelContinuation.yield(0)
 
         var attempt = 0
         while isRunning, !Task.isCancelled {
             do {
-                try startEngine()
+                try startPreferredEngine()
                 Self.logger.info("入力デバイスの変更後、録音を再開した")
                 return
             } catch {
@@ -158,6 +260,21 @@ public actor MicrophoneSource: AudioSource {
                 // 最初の数回は短い間隔で、その後はデバイスがつながるまで1秒おきに試す。ストリームは開いたままにする。
                 let delay: Duration = attempt < 10 ? .milliseconds(500) : .seconds(1)
                 try? await Task.sleep(for: delay)
+            }
+        }
+    }
+
+    /// 選んだマイクを使えなかった理由（ログ用。録音は Mac の設定のマイクで続ける）
+    private enum DeviceSelectionError: Error, CustomStringConvertible {
+        case notConnected
+        case setDeviceFailed(String)
+        case invalidFormat
+
+        var description: String {
+            switch self {
+            case .notConnected: "notConnected"
+            case .setDeviceFailed(let detail): "setDeviceFailed(\(detail))"
+            case .invalidFormat: "invalidFormat"
             }
         }
     }

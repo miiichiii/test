@@ -21,6 +21,10 @@ struct LiveMinutesApp: App {
                 secretStore: appDelegate.secretStore,
                 connectionTest: appDelegate.connectionTest,
                 chatGPTAccount: appDelegate.chatGPTAccount,
+                inputDevices: appDelegate.inputDevices,
+                onInputDeviceChange: { [microphone = appDelegate.microphone] uid in
+                    Task { await microphone.setPreferredDevice(uid: uid) }
+                },
                 loadLocales: { await AppleSpeechEngine.supportedLocaleIdentifiers() },
                 onCredentialsChange: { [controller = appDelegate.controller] in
                     Task { await controller.credentialsDidChange() }
@@ -37,6 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller: SessionController
     let connectionTest: ConnectionTest
     let chatGPTAccount: ChatGPTAccount
+    /// マイク。選び直しを伝えるために持つ
+    let microphone: MicrophoneSource
+    let inputDevices = AudioInputDeviceList()
 
     /// 最終確定（最大10秒）と保存を待つ上限。超えたら保存を諦めて終了する。
     private static let terminationTimeout: Duration = .seconds(12)
@@ -67,12 +74,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             client: llmClient,
             repository: repository
         )
+        let microphone = MicrophoneSource(preferredDeviceUID: settings.inputDeviceUID)
+        self.microphone = microphone
         self.settings = settings
         self.secretStore = secretStore
         self.connectionTest = ConnectionTest(client: llmClient, modelCatalog: { try await llmClient.chatGPTModelSlugs() })
         let controller = SessionController(
             engine: AppleSpeechEngine(),
-            source: MicrophoneSource(),
+            source: microphone,
             permission: SystemMicrophonePermission(),
             repository: repository,
             clock: SystemSessionClock(),

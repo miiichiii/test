@@ -28,6 +28,18 @@ public final class AppSettings {
         static let notesMinInterval = "LiveMinutes.notesMinInterval"
         static let glossary = "LiveMinutes.glossary"
         static let authMethod = "LiveMinutes.authMethod"
+        static let inputDeviceUID = "LiveMinutes.inputDeviceUID"
+        static let inputDeviceName = "LiveMinutes.inputDeviceName"
+    }
+
+    /// 使うマイクの UID（DESIGN.md §4.1「マイクの選択」）。空なら Mac の設定のマイク
+    public var inputDeviceUID: String {
+        didSet { defaults.set(inputDeviceUID, forKey: Key.inputDeviceUID) }
+    }
+
+    /// 使うマイクの名前（つながっていないときの表示用）
+    public var inputDeviceName: String {
+        didSet { defaults.set(inputDeviceName, forKey: Key.inputDeviceName) }
     }
 
     /// OpenAI への接続方法（API キーか ChatGPT のプラン。DESIGN.md §4.11）
@@ -104,6 +116,8 @@ public final class AppSettings {
         notesMinInterval = defaults.object(forKey: Key.notesMinInterval) as? TimeInterval ?? Self.defaultNotesMinInterval
         glossary = defaults.stringArray(forKey: Key.glossary) ?? []
         authMethod = defaults.string(forKey: Key.authMethod).flatMap(AuthMethod.init(rawValue:)) ?? .apiKey
+        inputDeviceUID = defaults.string(forKey: Key.inputDeviceUID) ?? ""
+        inputDeviceName = defaults.string(forKey: Key.inputDeviceName) ?? ""
     }
 
     /// リクエストに使うライブ更新用のモデルID（前後の空白を除く）。接続テストと本番で同じ値を使うため、ここからだけ読む
