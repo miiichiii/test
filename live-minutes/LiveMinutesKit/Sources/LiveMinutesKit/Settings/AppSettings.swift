@@ -16,6 +16,10 @@ public final class AppSettings {
     public nonisolated static let defaultNotesMinCharacters = 120
     public nonisolated static let defaultNotesMaxInterval: TimeInterval = 20
     public nonisolated static let defaultNotesMinInterval: TimeInterval = 8
+    /// 無音での自動一時停止の既定（オン、5分）と、選べる分数
+    public nonisolated static let defaultAutoPauseOnSilence = true
+    public nonisolated static let defaultAutoPauseMinutes = 5
+    public nonisolated static let autoPauseMinuteOptions = [3, 5, 10, 15]
 
     enum Key {
         static let liveModelID = "LiveMinutes.liveModelID"
@@ -33,11 +37,28 @@ public final class AppSettings {
         static let transcriptionEngine = "LiveMinutes.transcriptionEngine"
         static let whisperModel = "LiveMinutes.whisperModel"
         static let captureSystemAudio = "LiveMinutes.captureSystemAudio"
+        static let autoPauseOnSilence = "LiveMinutes.autoPauseOnSilence"
+        static let autoPauseMinutes = "LiveMinutes.autoPauseMinutes"
     }
 
     /// Mac 内の音声（オンライン会議の相手の声など）もマイクと混ぜて取り込む（Phase 7）。次に開始する会議から反映する
     public var captureSystemAudio: Bool {
         didSet { defaults.set(captureSystemAudio, forKey: Key.captureSystemAudio) }
+    }
+
+    /// 新しい発言（文字）がしばらく出なければ、録音を一時停止する
+    public var autoPauseOnSilence: Bool {
+        didSet { defaults.set(autoPauseOnSilence, forKey: Key.autoPauseOnSilence) }
+    }
+
+    /// 一時停止するまでの無音の長さ（分）
+    public var autoPauseMinutes: Int {
+        didSet { defaults.set(autoPauseMinutes, forKey: Key.autoPauseMinutes) }
+    }
+
+    /// 自動一時停止までの秒数。オフなら nil
+    public var autoPauseInterval: TimeInterval? {
+        autoPauseOnSilence && autoPauseMinutes > 0 ? TimeInterval(autoPauseMinutes) * 60 : nil
     }
 
     /// 書き起こしの方式（Apple / Whisper（ローカル））。次に開始する会議から反映する
@@ -139,6 +160,9 @@ public final class AppSettings {
         transcriptionEngine = defaults.string(forKey: Key.transcriptionEngine).flatMap(TranscriptionEngineKind.init(rawValue:)) ?? .apple
         whisperModel = defaults.string(forKey: Key.whisperModel) ?? WhisperModelStore.defaultVariant
         captureSystemAudio = defaults.object(forKey: Key.captureSystemAudio) as? Bool ?? false
+        autoPauseOnSilence = defaults.object(forKey: Key.autoPauseOnSilence) as? Bool ?? Self.defaultAutoPauseOnSilence
+        let storedMinutes = defaults.object(forKey: Key.autoPauseMinutes) as? Int ?? Self.defaultAutoPauseMinutes
+        autoPauseMinutes = Self.autoPauseMinuteOptions.contains(storedMinutes) ? storedMinutes : Self.defaultAutoPauseMinutes
     }
 
     /// 用語の入力欄の文字列（1行に1つ）を、登録する用語の一覧にする。前後の空白を除き、空行と重複を除く

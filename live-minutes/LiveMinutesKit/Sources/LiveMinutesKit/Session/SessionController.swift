@@ -106,6 +106,8 @@ public final class SessionController {
     private let sleepPreventer: (any SleepPreventing)?
     /// 入力レベル（0…1）
     public private(set) var inputLevel: Float = 0
+    /// 無音が続いたため自動で一時停止したとき、待った無音の長さ（秒）。再開・停止・次の開始で消す
+    public private(set) var autoPausedAfterSilence: TimeInterval?
 
     private let engine: any TranscriptionEngine
     private let source: any AudioSource
@@ -114,6 +116,12 @@ public final class SessionController {
     private let clock: any SessionClock
     private let recognitionLocale: @MainActor () -> Locale
     private let notesEngineFactory: (@MainActor (SessionMeta, NotesStore) async -> NotesEngine?)?
+    /// 新しい発言がこの秒数なければ一時停止する。nil なら自動では止めない（確かめるたびに読むので、設定の変更はすぐ効く）
+    private let autoPauseInterval: @MainActor () -> TimeInterval?
+    private let autoPauseNotifier: (any AutoPauseNotifying)?
+
+    /// 無音を確かめる間隔（秒）
+    static let silenceCheckInterval: TimeInterval = 5
 
     /// 停止時に、ノートの残りの送信を待つ上限（秒）
     static let notesFlushTimeout: TimeInterval = 15
@@ -135,6 +143,10 @@ public final class SessionController {
     private var operation: Task<Void, Never>?
     private var failureTask: Task<Void, Never>?
     private var levelTask: Task<Void, Never>?
+    /// 録音中だけ動かす、無音を確かめる Task
+    private var silenceTask: Task<Void, Never>?
+    /// 最後に文字（未確定を含む）が出た時点、または録音を始めた・再開した時点の `clock.uptime()`
+    private var lastSpeechAt: TimeInterval?
     /// 今のセッションのライブ更新。API キーがなければ nil
     private var notesEngine: NotesEngine?
     /// 一時停止トグルの変更をエンジンへ順に伝える
@@ -163,7 +175,9 @@ public final class SessionController {
         notesEngineFactory: (@MainActor (SessionMeta, NotesStore) async -> NotesEngine?)? = nil,
         minutesGenerator: (any MinutesGenerating)? = nil,
         glossary: @escaping @MainActor () -> [String] = { [] },
-        sleepPreventer: (any SleepPreventing)? = nil
+        sleepPreventer: (any SleepPreventing)? = nil,
+        autoPauseInterval: @escaping @MainActor () -> TimeInterval? = { nil },
+        autoPauseNotifier: (any AutoPauseNotifying)? = nil
     ) {
         self.engine = engine
         self.source = source
@@ -175,6 +189,8 @@ public final class SessionController {
         self.minutes = MinutesStore(generator: minutesGenerator, repository: repository)
         self.glossary = glossary
         self.sleepPreventer = sleepPreventer
+        self.autoPauseInterval = autoPauseInterval
+        self.autoPauseNotifier = autoPauseNotifier
     }
 
     // MARK: - 画面から読む値
@@ -469,6 +485,7 @@ public final class SessionController {
         notes.reset()
         minutes.reset()
         warning = nil
+        autoPausedAfterSilence = nil
         sessionMeta = meta
         activeSessionID = meta.id
         accumulated = 0
@@ -477,11 +494,13 @@ public final class SessionController {
         expectingStreamEnd = false
         state = .recording
         eventsTask = makeEventsTask(events, offset: 0, sessionID: meta.id)
+        startSilenceWatch()
         // 未設定ならライブ更新は動かさず、文字起こしだけを続ける。会議の開始を待たせないよう、別の Task で作る。
         startAttachingNotesEngine(for: meta)
     }
 
     private func runPause() async {
+        stopSilenceWatch()
         freezeElapsed()
         expectingStreamEnd = true
         state = .paused
@@ -509,7 +528,9 @@ public final class SessionController {
             runStartedAt = clock.uptime()
             expectingStreamEnd = false
             state = .recording
+            autoPausedAfterSilence = nil
             eventsTask = makeEventsTask(events, offset: offset, sessionID: sessionID)
+            startSilenceWatch()
         } catch {
             problem = Problem(error)
         }
@@ -526,6 +547,8 @@ public final class SessionController {
         }
         // 最初の await より前に消して、二重に走らないようにする。
         activeSessionID = nil
+        stopSilenceWatch()
+        autoPausedAfterSilence = nil
         freezeElapsed()
         expectingStreamEnd = true
         state = .finishing
@@ -598,6 +621,7 @@ public final class SessionController {
     }
 
     private func handle(_ event: TranscriptEvent, offset: TimeInterval, sessionID: UUID) async {
+        noteSpeech(in: event)
         guard case .final(let segment) = event else {
             transcript.apply(event)
             return
@@ -650,6 +674,55 @@ public final class SessionController {
             }
             self.failureTask = nil
         }
+    }
+
+    // MARK: - 無音での自動一時停止
+
+    /// 文字が出たら、無音の数え始めを今にする（空の未確定は、表示を消すだけなので数えない）。
+    private func noteSpeech(in event: TranscriptEvent) {
+        let text: String
+        switch event {
+        case .volatile(let value): text = value
+        case .final(let segment): text = segment.text
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        lastSpeechAt = clock.uptime()
+    }
+
+    private func startSilenceWatch() {
+        silenceTask?.cancel()
+        lastSpeechAt = clock.uptime()
+        let interval = Self.silenceCheckInterval
+        silenceTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(interval))
+                guard !Task.isCancelled else { return }
+                await self?.checkSilence()
+            }
+        }
+    }
+
+    private func stopSilenceWatch() {
+        silenceTask?.cancel()
+        silenceTask = nil
+        lastSpeechAt = nil
+    }
+
+    /// 録音中に、新しい文字が設定の時間なければ一時停止して知らせる。
+    func checkSilence() async {
+        guard operation == nil, state == .recording,
+              let limit = autoPauseInterval(), limit > 0,
+              let lastSpeechAt, clock.uptime() - lastSpeechAt >= limit else { return }
+        Self.logger.info("無音が続いたため一時停止する")
+        await pause()
+        guard state == .paused else { return }
+        autoPausedAfterSilence = limit
+        autoPauseNotifier?.notifyAutoPaused(after: limit)
+    }
+
+    /// 秒数を「5 分」のような表記にする（通知と画面の案内に使う）。
+    public nonisolated static func minutesText(_ seconds: TimeInterval) -> String {
+        seconds >= 60 ? "\(Int((seconds / 60).rounded())) 分" : "\(Int(seconds.rounded())) 秒"
     }
 
     // MARK: - 内部

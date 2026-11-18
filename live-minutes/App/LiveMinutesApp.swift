@@ -138,7 +138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             notesEngineFactory: { meta, store in await notesFactory.makeEngine(for: meta, store: store) },
             minutesGenerator: minutesWriter,
             glossary: { settings.glossary },
-            sleepPreventer: SystemSleepPreventer()
+            sleepPreventer: SystemSleepPreventer(),
+            autoPauseInterval: { settings.autoPauseInterval },
+            autoPauseNotifier: SystemAutoPauseNotifier()
         )
         self.controller = controller
         self.chatGPTAccount = ChatGPTAccount(

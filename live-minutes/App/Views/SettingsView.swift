@@ -85,6 +85,17 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Toggle("無音が続いたら一時停止する", isOn: $settings.autoPauseOnSilence)
+                Picker("一時停止するまで", selection: $settings.autoPauseMinutes) {
+                    ForEach(AppSettings.autoPauseMinuteOptions, id: \.self) { minutes in
+                        Text("\(minutes) 分").tag(minutes)
+                    }
+                }
+                .disabled(!settings.autoPauseOnSilence)
+                Text("新しい文字がこの時間出なければ、録音を一時停止して通知で知らせます（会議の消し忘れを防ぐため）。「再開」で同じ会議を続けられます。録音中に変えると、すぐに反映します。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Picker("書き起こしの方式", selection: $settings.transcriptionEngine) {
                     Text("Apple（端末内）").tag(TranscriptionEngineKind.apple)
                     Text("Whisper（ローカル）").tag(TranscriptionEngineKind.whisperLocal)

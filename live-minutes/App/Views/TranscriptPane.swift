@@ -18,6 +18,12 @@ struct TranscriptPane: View {
             if let warning = controller.warning {
                 Banner(message: warning.message, systemImage: "externaldrive.badge.exclamationmark")
             }
+            if let silence = controller.autoPausedAfterSilence, controller.state == .paused {
+                Banner(
+                    message: "新しい発言が \(SessionController.minutesText(silence)) なかったため、一時停止しました。続けるときは「再開」を押してください。",
+                    systemImage: "pause.circle"
+                )
+            }
             if case .preparing(let progress?) = controller.state {
                 ModelDownloadProgress(progress: progress)
             }
