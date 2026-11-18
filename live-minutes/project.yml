@@ -16,8 +16,8 @@ settings:
     # XcodeGen の既定は 5.0。Swift 6 モードでは厳格な並行性チェックが常に complete になる
     # （SWIFT_STRICT_CONCURRENCY は Swift 5 以下でだけ効く設定なので書かない）。
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
 
 targets:
   LiveMinutes:
