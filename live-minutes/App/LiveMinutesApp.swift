@@ -16,10 +16,10 @@ struct LiveMinutesApp: App {
         .commands { MeetingCommands(controller: appDelegate.controller) }
 
         // メニューバーから操作できるようにする（Phase 6）。録音中はアイコンで分かる。
-        MenuBarExtra {
+        // ラベルは標準の形（タイトルとアイコン名）で渡す。View に独自の読み上げラベルを付けると、
+        // 他のアプリが読み上げ情報を問い合わせたときに SwiftUI の中で呼び出しが循環し、落ちることがあった。
+        MenuBarExtra("LiveMinutes", systemImage: MenuBarIcon.systemImage(for: appDelegate.controller.state)) {
             MenuBarContent(controller: appDelegate.controller)
-        } label: {
-            MenuBarIcon(state: appDelegate.controller.state)
         }
 
         // 設定画面（Cmd+, とツールバーの設定ボタン）

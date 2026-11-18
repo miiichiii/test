@@ -128,7 +128,6 @@ private struct VolatileRow: View {
                 Text(text)
                     .foregroundStyle(.secondary)
                     .padding(.leading, SegmentRow.timeWidth + SegmentRow.spacing)
-                    .accessibilityLabel("未確定: \(text)")
             }
         }
         .onChange(of: text) { onChange() }
@@ -165,7 +164,6 @@ private struct SegmentRow: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: Self.timeWidth, alignment: .leading)
-                .accessibilityLabel("開始 \(ElapsedTimeFormat.string(segment.start))")
             Text(segment.text)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)

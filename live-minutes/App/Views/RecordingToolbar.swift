@@ -103,7 +103,6 @@ private struct ElapsedTimeLabel: View {
                 Text(ElapsedTimeFormat.string(controller.elapsed()))
                     .monospacedDigit()
                     .foregroundStyle(controller.state == .recording ? .primary : .secondary)
-                    .accessibilityLabel("録音経過時間")
             }
         }
     }
@@ -126,9 +125,8 @@ private struct LevelMeter: View {
             }
             .frame(width: 80, height: 6)
             .animation(.linear(duration: 0.1), value: level)
-            .accessibilityElement()
-            .accessibilityLabel("入力レベル")
-            .accessibilityValue("\(Int(level * 100))%")
+            // 1秒に何度も変わる値なので、読み上げの対象から外す（独自のラベルが循環して落ちる問題を避けるため）。
+            .accessibilityHidden(true)
     }
 }
 

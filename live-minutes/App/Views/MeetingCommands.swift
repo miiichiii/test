@@ -74,14 +74,12 @@ struct MenuBarContent: View {
 }
 
 /// メニューバーのアイコン。録音中は塗りつぶしにして、録音していることが分かるようにする。
-struct MenuBarIcon: View {
-    let state: SessionController.State
-
-    var body: some View {
+enum MenuBarIcon {
+    static func systemImage(for state: SessionController.State) -> String {
         switch state {
-        case .recording: Image(systemName: "record.circle.fill").accessibilityLabel("LiveMinutes: 録音中")
-        case .paused: Image(systemName: "pause.circle.fill").accessibilityLabel("LiveMinutes: 一時停止中")
-        default: Image(systemName: "waveform.circle").accessibilityLabel("LiveMinutes")
+        case .recording: "record.circle.fill"
+        case .paused: "pause.circle.fill"
+        default: "waveform.circle"
         }
     }
 }

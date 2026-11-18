@@ -253,7 +253,6 @@ private struct NoteItemRow: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .help("手で直した項目です。この後の自動の整理では書き換えません")
-                            .accessibilityLabel("手で直した項目")
                     }
                 }
                 let suffix = details
